@@ -42,7 +42,6 @@ def mass_balance(Ci, Q, V, n_total, n_map, C_out=400, alpha=0.05, time_step=5, m
     """
     dC = (Ci[0] - Ci[1]) / time_step
     Cr = [alpha * C_out + (1 - alpha) * np.average(Ci[0][n_map[el]]) for el in Ci[0]]
-    print(Q * (Ci[0] - Cr) + V * dC)
     N = (Q * (Ci[0] - Cr) + V * dC) / m
     N_estimate = N / np.sum(N) * n_total
     return N_estimate.round(decimals)
