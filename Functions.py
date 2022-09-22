@@ -100,7 +100,7 @@ def optimise_mass_balance(C, n_total, Q, V, n_map=None, m_range=(5, 30), precisi
     for m in range(m_range[0], m_range[1] + 1, precision):
 
         N = (Q * (C[1:] - Cr) + V * dC) / m
-        err = np.sum((np.sum(N, axis=1) - n_total[:-1]) ** 2)
+        err = np.sum((np.sum(N, axis=1)/len(N) - n_total[:-1]) ** 2)
         if err < lowest_cost:
             lowest_cost = copy(err)
             best_m = m
