@@ -13,9 +13,7 @@ alpha = 0.05
 Ci = np.random.randint(700, 1000, (2, 27))
 Ci0 = np.random.randint(350, 450, (2, 27))
 V = np.random.randint(50, 200, 27)
-Q = 1.25*V
+Q = np.random.random(27)
 
-N_estimate = mass_balance(Ci, Q, V, N_total, alpha=1)
+N_estimate = mass_balance(Ci, Q, V, N_total, alpha=1, decimals=1)
 print(N_estimate, np.sum(N_estimate), N_total)
-
-
