@@ -5,26 +5,36 @@ from datetime import datetime
 from datetime import timedelta
 
 
-def basic_weighting(Ci, Ci0, n_total, decimals=0, include_max=False, M=None):
+def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
     """
     Takes the vectors of CO2 and baseline CO2, then applies the
     simple weighting of the occupancy in the zones from the total
     number of occupants. Can also include the weighting based on
     maximum occupants per zone as specified by M. This method appears
-    very prone to rounding errors
-    :param Ci: vector of current CO2
-    :param Ci0: vector of baseline CO2
-    :param n_total: integer of total occupants
-    :param decimals: number of decimals for rounding
-    :param include_max: bool
-    :param M: vector of maximum occupancy per zone
-    :return:
+    very prone to rounding errors. Can either ignore the unknown zones
+    or spread the mean of the other zones to those unknown zones.
+    :param Ci:              vector of current CO2
+    :param Ci0:             vector of baseline CO2
+    :param n_total:         integer of total occupants
+    :param decimals:        number of decimals for rounding
+    :param M:               vector of maximum occupancy per zone
+    :param assume_unknown:  bool of what to do with unknown zones
+    :return: N_estimate     vector of estimated N in each zone
     """
     Ci.flatten()
     Ci0.flatten()
+    # Quick fix for zones with no data:
+    Ci0[Ci == 0] = 0
     N_estimated = n_total * (Ci - Ci0) / sum(Ci - Ci0)
-    if include_max:
+    if M is not None:
         N_estimated = N_estimated * M / np.average(M)
+    if assume_unknown:
+        # Calculate mean from the estimate where only zones with data are included
+        mean = np.average(N_estimated[N_estimated != 0])
+        # Use this to spread out the mean to those unknown zones
+        n_unknown = len(N_estimated)-np.count_nonzero(N_estimated)
+        N_estimated[N_estimated != 0] -= n_unknown/(len(N_estimated)-n_unknown) * mean
+        N_estimated[N_estimated == 0] = mean
     return N_estimated.round(decimals)
 
 
@@ -165,7 +175,6 @@ def optimise_mass_balance_Q(C, n_total, Q, V, m=20, n_map=None, learning_rate=0.
             Q_temp[j] = q * (1 - learning_rate)
             n_temp = (Q_temp * (c - cr) + V * dc) / m
             err_temp = np.sum((np.sum(n_temp) - n) ** 2)
-            print(err_temp - err_base)
             grad[j] = (err_temp - err_base) / learning_rate
         # print(Q)
         Q = np.array([q - q * grad[j] if q - q * grad[j] > 0 else q for j, q in enumerate(Q)])
@@ -243,6 +252,23 @@ def update_data(new_data, old_data, old_time, time_index=0, id_index=1, co2_inde
         # If there is data in both, do nothing
 
     return output, output_time
+
+
+def level_from_estimate(N, M, treshs=(0.3, 0.7)):
+    """
+    Given occupancy estimate and maximum capacity arrays
+    map them to an occupancy level (0-3) based on thresholds
+    defined in t. If an N is exactly 0 assume unknown (0)
+    :param N:       array of occupancy estimates
+    :param M:       array of maximum capacity
+    :param treshs:  tuple of two thresholds
+    :return: output array of occupancy level
+    """
+
+    percentage = N / M
+    output = [0 if p == 0 else(1 if p < treshs[0] else (2 if p < treshs[1] else 3)) for p in percentage]
+
+    return output
 
 
 def summary_stats_datetime_difference(time1, time2, p=True):
