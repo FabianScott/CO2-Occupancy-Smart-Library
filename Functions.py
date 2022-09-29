@@ -56,7 +56,8 @@ def mass_balance(C, Q, V, n_total, n_map=None, C_out=400, alpha=0.05, time_step=
                  24: [23, 25], 25: [24, 26], 26: [25, 27], 27: [21, 26]
                  }
     dC = (C[:, 0] - C[:, 1]) / time_step
-    Cr = [alpha * C_out + (1 - alpha) * np.average(C[:, 0][np.array(n_map[el]) - 1]) for el in range(1, 1 + len(C[:, 0]))]
+    Cr = [alpha * C_out + (1 - alpha) * np.average(C[:, 0][np.array(n_map[el]) - 1]) for el in
+          range(1, 1 + len(C[:, 0]))]
     N = (Q * (C[:, 0] - Cr) + V * dC) / m
     N_estimated = N / np.sum(N) * n_total
     if M is not None:
@@ -161,74 +162,104 @@ def optimise_mass_balance_Q(C, n_total, Q, V, m=20, n_map=None, learning_rate=0.
         grad = np.zeros(27)
         for j, q in enumerate(Q):
             Q_temp = copy(Q)
-            Q_temp[j] = q*(1 - learning_rate)
+            Q_temp[j] = q * (1 - learning_rate)
             n_temp = (Q_temp * (c - cr) + V * dc) / m
             err_temp = np.sum((np.sum(n_temp) - n) ** 2)
-            print(err_temp-err_base)
+            print(err_temp - err_base)
             grad[j] = (err_temp - err_base) / learning_rate
         # print(Q)
-        Q = np.array([q - q*grad[j] if q - q*grad[j] > 0 else q for j, q in enumerate(Q)])
+        Q = np.array([q - q * grad[j] if q - q * grad[j] > 0 else q for j, q in enumerate(Q)])
     return Q
 
 
-def process_data(df, minutes, time_index=0, id_index=1):
+def process_data(df, minutes, time_indexes=None, id_index=1):
     """
-    Function to call to format the data so it can be used in Python.
-    First job is to convert the time string into datetime object
-    Second one is mapping device ID's to zone numbers
-    Third one is removing too old data points
-    Fourth one is sorting based on time
+    Function to call to format the data so it can be used in update_data
+    1: convert the time string into datetime object
+    2: map device ID's to zone numbers
+    3: remove too old data points
+    4: sort based on time
     :param df:              pandas dataframe of data from sql server
     :param minutes:         now - minutes is threshold for new data
-    :param time_index:      column index of time variables
+    :param time_indexes:      iterable column indexes of time variables, first el is used to sort by
     :param id_index:        column index of device ID's
     :return: data:          numpy array of data in correct format
     """
 
+    if time_indexes is None:
+        time_indexes = [0]
     data = np.array(df.values)
     id_map = {'DA00110043': 1, 'DA00110044': 2, 'DA00110045': 3, 'DA00130002': 4, 'DA00130001': 5, 'DA00110031': 6,
               'DA00110041': 7, 'DA00110047': 8, 'DA00110035': 9, 'DA00110049': 10, 'DA00110032': 11, 'AMNO-03': 12,
               'DA00130004': 13, 'DA00110033': 14, 'AMNO-04': 15, 'DA00110037': 16, 'DA00130003': 17, 'AMNO-01': 18,
               'AMNO-02': 19, 'DA00110040': 20, 'DA00100001': 21, 'DA00110036': 22, 'DA00110034': 23, 'DA00120001': 24,
-              'DA00110039': 25, 'DA00110042': 26, 'DA00110038': 27, }     # Must be verified
-    # Convert all time strings to datetime to perform maths on them
-    for i, t in enumerate(data[:, time_index]):
-        t = t.replace('T', ':')[:-8]
-        # Convert to datetime object
-        data[i, time_index] = datetime.strptime(t, '%Y-%m-%d:%H:%M:%S')
-        # Convert to number corresponding to zone
-        data[i, id_index] = id_map[data[i, id_index]]
+              'DA00110039': 25, 'DA00110042': 26, 'DA00110038': 27, }  # Must be verified
+    # Convert all time strings to datetime to perform arithmetic on them
+    for i, index in enumerate(time_indexes):
+        for j, t in enumerate(data[:, index]):
+            t = t.replace('T', ':')[:-8]
+            # Convert to datetime object
+            data[j, index] = datetime.strptime(t, '%Y-%m-%d:%H:%M:%S')
+            # Convert to number corresponding to zone
+            if not i:  # Only map data once
+                data[j, id_index] = id_map[data[j, id_index]]
 
     # Remove rows where time is before specified time
     time_cutoff = datetime.now() - timedelta(minutes=minutes)
-    data = data[data[:, time_index] > time_cutoff]
+    data = data[data[:, time_indexes[0]] > time_cutoff]
     # Sort by date so newest is at the top
-    data = np.flip(data[data[:, 0].argsort()], axis=0)
+    data = np.flip(data[data[:, time_indexes[0]].argsort()], axis=0)
 
     return data
 
 
-def update_data(new_data, old_data, id_index=1, co2_index=2):
+def update_data(new_data, old_data, old_time, time_index=0, id_index=1, co2_index=2):
     """
-    Given the new rows of data in the processed format find the
+    Given the new rows of data in the PROCESSED FORMAT find the
     devices that have produced new co2 data. If they have produced
     two outputs these will be stored in order. The old_data is then
     supplanted in the entries where there is new data.
-    :param new_data:    (nx3) matrix of new data points
-    :param old_data:    (27x2) matrix of data used in the previous iteration
-    :param id_index:    int of the index in new data where the zone ID's are stored
-    :param co2_index:   int of the index in new data where the co2 data is stored
-    :return: output     (27x2) matrix of the most up to date data available
+    :param new_data:        (nxm) matrix of new data points
+    :param old_data:        (27x2) matrix of data used in the previous iteration
+    :param old_time:        (27x2) matrix of timestamps from previous iteration
+    :param time_index:      int of the index where the time label is
+    :param id_index:        int of the index in new data where the zone ID's are stored
+    :param co2_index:       int of the index in new data where the co2 data is stored
+    :return: output         (27x2) matrix of the most up to date data available
+    :return: output_time    (27x2) List of timestamps of data
     """
-    output = np.zeros((27, 2))
+    output = old_data
+    output_time = old_time
     for row in new_data:
+        device_id = row[id_index] - 1  # convert to comply with 0 indexed arrays
         # If no data from the current device has been seen yet, input it in the first column of output
-        device_id = row[id_index] - 1   # 0 indexed arrays
-        if not output[device_id, 0]:
-            output[device_id, 0] = row[co2_index]
+        if not output[device_id][0]:
+            output_time[device_id] = row[time_index]
+            output[device_id][0] = row[co2_index]
         # If there is data in the first column, input the data in the second column
-        elif not output[device_id, 1]:
-            output[device_id, 1] = row[co2_index]
-    output[output == 0] = old_data[output == 0]
+        elif not output[device_id][1]:
+            output_time[device_id] = row[time_index]
+            output[device_id][1] = row[co2_index]
+        # If there is data in both, do nothing
 
-    return output
+    return output, output_time
+
+
+def summary_stats_datetime_difference(time1, time2, p=True):
+    """
+    Given 2 numpy arrays of datetimes, compute the mean, median and
+    standard deviation of their difference. If mean and median are negative
+    this function calculates the reverse difference
+    :param time1:       array of datetimes
+    :param time2:       array of datetimes
+    :param p:           bool: to print or not to print
+    :return: m, M, sd   float: mean, median and standard deviation
+    """
+    obj = pd.to_timedelta(pd.Series(time2 - time1))
+    m, M, sd = obj.mean(), obj.median, obj.std()
+    if m < timedelta(seconds=0) and M < timedelta(seconds=0):
+        obj = pd.to_timedelta(pd.Series(time1 - time2))
+        m, M, sd = obj.mean(), obj.median, obj.std()
+    if p:
+        print(f'Mean: {m}\nMedian: {M}\nSD: {sd}')
+    return m, M, sd
