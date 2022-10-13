@@ -25,6 +25,7 @@ def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
     Ci0.flatten()
     # Quick fix for zones with no data:
     Ci0[Ci == 0] = 0
+    print(sum(Ci-Ci0))
     N_estimated = n_total * (Ci - Ci0) / sum(Ci - Ci0)
     if M is not None:
         N_estimated = N_estimated * M / np.average(M)
@@ -38,7 +39,7 @@ def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
     return N_estimated.round(decimals)
 
 
-def mass_balance(C, Q, V, n_total, n_map=None, C_out=400, alpha=0.05, time_step=5, m=20, decimals=0, M=None):
+def mass_balance(C, Q, V, n_total, n_map=None, C_out=420, alpha=0.7, time_step=5, m=20, decimals=0, M=None, fill_neighbours=False):
     """
     This function calculates the derivative of Ci, creates the replacement
     CO2 vector from the neighbour map (n_map) and calculates the estimated
@@ -55,6 +56,7 @@ def mass_balance(C, Q, V, n_total, n_map=None, C_out=400, alpha=0.05, time_step=
     :param alpha:       float/vector of proportion of outdoor air in exchange
     :param n_total:     int number of people in the entire library
     :param C_out:       float CO2 concentration outdoors
+    :param fill_neighbours: bool of whether to use average of neighbouring zones for estimation, do not use!!
     :return:            vector of estimated number of people per zone
     """
     Q.flatten()
@@ -65,10 +67,32 @@ def mass_balance(C, Q, V, n_total, n_map=None, C_out=400, alpha=0.05, time_step=
                  17: [16, 18], 18: [17, 19], 19: [18, 20], 20: [11, 19], 21: [22, 27], 22: [21, 23], 23: [22, 24],
                  24: [23, 25], 25: [24, 26], 26: [25, 27], 27: [21, 26]
                  }
+    if fill_neighbours:
+        for zone_number in range(len(C[:, 0])):
+            temp = []
+            if C[:, 0][zone_number] == 0:
+                for neighbour in n_map[zone_number + 1]:
+                    neighbour -= 1
+                    if C[:, 0][neighbour] > 0:
+                        temp.append(C[:, 0][neighbour])
+                C[:, 0][zone_number] = np.average(temp)
+
+    Cr = np.empty(27)
+    for zone_number in range(len(C[:, 0])):
+        temp = []
+        for neighbour in n_map[zone_number + 1]:
+            neighbour -= 1
+            if C[:, 0][neighbour] > 0:
+                temp.append(C[:, 0][neighbour])
+        Cr[zone_number] = alpha * C_out + (1 - alpha) * np.average(temp)
+    Cr[C[:, 0] == 0] = 0
     dC = (C[:, 0] - C[:, 1]) / time_step
-    Cr = [alpha * C_out + (1 - alpha) * np.average(C[:, 0][np.array(n_map[el]) - 1]) for el in
-          range(1, 1 + len(C[:, 0]))]
     N = (Q * (C[:, 0] - Cr) + V * dC) / m
+    print(C)
+    print(dC)
+    print(Cr)
+    print((C[:, 0] - Cr))
+    print(f'True Mass Balance Estiamte: \n{N}')
     N_estimated = N / np.sum(N) * n_total
     if M is not None:
         M.flatten()
