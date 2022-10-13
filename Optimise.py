@@ -25,7 +25,7 @@ def objective_function_scalar(x, n_true):
 def objective_function_vector(x, n_true):
     C_out, m = x[:2]
     Q = np.array(x[2:])
-    
+
     n = sum((Q * (C[:, :, 0] - Cr) + V * dC) / m)
     return np.abs(n_true - n)
 
