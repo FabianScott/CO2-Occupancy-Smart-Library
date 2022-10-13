@@ -1,0 +1,1 @@
+select top 1000 * from [dbo].[Axis_P8815-2_3D_People_Counter]  where "enqueuedTime" between '2022-02-01' and '2022-03-15'  order by IdPxKey desc
