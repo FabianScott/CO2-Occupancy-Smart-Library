@@ -1,6 +1,9 @@
 import pandas as pd
-import datetime
-import numpy as np
+import seaborn as sns
+from utils.hist_tools import add_curr_occ, plot_window, get_reading
+
+
+sns.set_theme(style="darkgrid")
 
 # Read CO2 Level
 CO2 = pd.read_csv("data/CO2_data_library.csv", sep=";", parse_dates=["Timestamp"])
@@ -19,26 +22,31 @@ Occ = pd.read_csv("data/Occu_data_library.csv", sep=";", parse_dates=["Timestamp
 Occ = Occ.groupby(Occ.Timestamp).sum()
 Occ["change"] = Occ["in"] - Occ["out"]
 
+# Assumptions of current occupancy:
+#   - (resetting at 4 o'clock)
+#   - never having negative occupancy
+Occ = add_curr_occ(Occ, reset_hour=4)
 
-def current_people(timestamp, before, change, reset_time=4):
-    """
-    :param before:              what the count was at previous timestamp
-    :param change:              change of count
-    :param reset_time:          timestamp where the current amout of people in library is reset to zero. Has to be an integer for 24 hour clock
-    """
-    if timestamp.hour in reset_time:
-        return 0
-    else:
-        return before + change
+# Combining
+df = pd.concat([Occ["Current Occupancy"], CO2], axis=1).dropna()
 
+plot_window(df, "2021-08-23", "2021-09-30")
+plot_window(df, "2021-11-01", "2021-12-13")
+plot_window(df, "2021-12-15")
 
-occ = np.zeros(len(Occ))
-occ[0] = 200  # The change between 16:00 and 03:00 first day
-for i in range(1, len(occ)):
-    occ[i] = current_people(
-        Occ.index[i], occ[i - 1], Occ.change.iloc[i], reset_time=range(4)
-    )
+# Using the new estimated current occupancy
+# We can approximate the CO2 level for every zone
+zero_level = df[df["Current Occupancy"] == 0].mean()[1:]
 
-Occ["current"] = occ
+# There is a 3% measure accuracy
+# https://www.connectedbaltics.com/wp-content/uploads/2017/12/AirWitsCO2_brochure-1pageENG.pdf
+zero_level = pd.concat(
+    [zero_level.rename("ppm"), (zero_level * 0.03).rename("acc. +/-")], axis=1
+)
+print("Mean ppm when occupancy is estimated to 0: ", zero_level)
 
-print((Occ["current"] < 0).sum())
+# Get nearest reading of time witten as "yyyy-mm-dd hh:mm:ss"
+timestamp, occupancy, co2 = get_reading(df, "2021-11-05 12:20:00")
+print(
+    f"Got the following readings at {str(timestamp)}: \n CO2: \n{co2}\n Occ: {float(occupancy)}"
+)
