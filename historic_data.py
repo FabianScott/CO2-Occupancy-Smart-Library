@@ -1,6 +1,11 @@
 import pandas as pd
 import seaborn as sns
-from utils.hist_tools import add_curr_occ, plot_window, get_reading
+from utils.hist_tools import (
+    add_curr_occ,
+    plot_window_co2_occ,
+    plot_window_occ,
+    get_reading,
+)
 
 
 sns.set_theme(style="darkgrid")
@@ -27,12 +32,16 @@ Occ["change"] = Occ["in"] - Occ["out"]
 #   - never having negative occupancy
 Occ = add_curr_occ(Occ, reset_hour=4)
 
+plot_window_occ(Occ, "2021-08-02", "2021-09-30")
+plot_window_occ(Occ, "2021-11-01", "2021-12-13")
+plot_window_occ(Occ, "2021-12-15")
+
 # Combining
 df = pd.concat([Occ["Current Occupancy"], CO2], axis=1).dropna()
 
-plot_window(df, "2021-08-23", "2021-09-30")
-plot_window(df, "2021-11-01", "2021-12-13")
-plot_window(df, "2021-12-15")
+plot_window_co2_occ(df, "2021-08-23", "2021-09-30")
+plot_window_co2_occ(df, "2021-11-01", "2021-12-13")
+plot_window_co2_occ(df, "2021-12-15")
 
 # Using the new estimated current occupancy
 # We can approximate the CO2 level for every zone

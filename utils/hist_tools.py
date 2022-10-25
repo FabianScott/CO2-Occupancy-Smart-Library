@@ -40,7 +40,34 @@ def nomalize_df(df):
     return (df - df.min()) / (df.max() - df.min())
 
 
-def plot_window(df, start_time=None, end_time=None, normalize=False):
+def plot_window_occ(df, start_time=None, end_time=None, normalize=False):
+    if start_time == None:
+        start_time = df.index[0]  # Just a early year
+
+    if end_time == None:
+        end_time = df.index[-1]
+
+    time_mask = (df.index >= start_time) & (df.index <= end_time)
+
+    df = df[time_mask]
+    x = df.index
+
+    y1 = df["Current Occupancy"]
+
+    if normalize == True:
+        y1 = nomalize_df(y1)
+        y2 = nomalize_df(y2)
+
+    fig, ax1 = plt.subplots(dpi=600, figsize=(15, 6))
+    ax1.plot(x, y1, "b-")
+    ax1.set_xlabel("Time")
+    ax1.set_ylabel("Occupancy [no. people]", color="b")
+    time_int = f"{str(start_time).split(' ')[0]}-{str(end_time).split(' ')[0]}"
+    plt.title(f"Time period: {time_int}")
+    plt.savefig(f"docs/plots/occ_{time_int}.png")
+
+
+def plot_window_co2_occ(df, start_time=None, end_time=None, normalize=False):
     if start_time == None:
         start_time = df.index[0]  # Just a early year
 
