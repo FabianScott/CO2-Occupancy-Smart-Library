@@ -145,7 +145,7 @@ def process_data(df, minutes, time_indexes=None, id_index=1):
               'DA00130004': 13, 'DA00110033': 14, 'AMNO-04': 15, 'DA00110037': 16, 'DA00130003': 17, 'AMNO-01': 18,
               'AMNO-02': 19, 'DA00110040': 20, 'DA00100001': 21, 'DA00110036': 22, 'DA00110034': 23, 'DA00120001': 24,
               'DA00110039': 25, 'DA00110042': 26, 'DA00110038': 27, }  # Must be verified
-    # Convert all time strings to datetime to perform arithmetic on them
+    # Convert all time strings to datetime to perform arithmetics on them
     for i, index in enumerate(time_indexes):
         for j, t in enumerate(data[:, index]):
             t = t.replace('T', ':')[:-8]
@@ -230,3 +230,20 @@ def summary_stats_datetime_difference(time1, time2, p=True):
     if p:
         print(f'Mean: {m}\nMedian: {M}\nSD: {sd}')
     return m, M, sd
+
+
+def exponential_moving_average(C, t, tau=900):
+    """
+    Given CO2 measurements with creation time, return the value smoothed
+    based on the previous measurements. Time window can be specified.
+    :param C:
+    :param t:
+    :param tau:
+    :return:
+    """
+    t = np.array([el.seconds for el in (t[0] - t)])
+    smoothed = [C[0] for _ in C]
+    for j in range(1, len(t)):
+        w = np.exp(-(t[j] - t[j - 1]) / tau)
+        smoothed[j] = smoothed[j - 1] * w + C[j] * (1 - w)
+    return smoothed
