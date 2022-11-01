@@ -2,15 +2,20 @@ import random
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
-from scipy.optimize import minimize, LinearConstraint, minimize_scalar, differential_evolution
-from Functions import process_data, exponential_moving_average
+from scipy.optimize import (
+    minimize,
+    LinearConstraint,
+    minimize_scalar,
+    differential_evolution,
+)
+from .Functions import process_data, exponential_moving_average
 
 random.seed(42)
 V = 150
 N_true = 500
 
-df = pd.read_csv('data/zone23.csv')
-df['device_id'] = ['DA00110034' for _ in df.values[:, 0]]
+df = pd.read_csv("data/zone23.csv")
+df["device_id"] = ["DA00110034" for _ in df.values[:, 0]]
 new_data = process_data(df, time_indexes=[0, 1], id_index=3, minutes=10000000)
 
 
@@ -33,7 +38,10 @@ def objective_normal(x, C, N, V, dt, uncertainty=50, percent=0.03):
     :return:
     """
     m, C_out, Q = x
-    uncertainty, percent = uncertainty / 2, percent / 2  # it is the 95 % confidence, therefor 2 sd's
+    uncertainty, percent = (
+        uncertainty / 2,
+        percent / 2,
+    )  # it is the 95 % confidence, therefor 2 sd's
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
 
     C_est = (Q * dt * C_out + V * Ci - m * N * dt) / (Q * dt + V)
