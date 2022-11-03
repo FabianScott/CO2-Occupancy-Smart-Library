@@ -3,8 +3,8 @@ import pandas as pd
 from Functions import update_data, process_data, basic_weighting, \
     level_from_estimate, mass_balance
 
-df = pd.read_csv('data/data1.csv')
-new_data = process_data(df, time_indexes=[0, 3], minutes=10000000)
+df = pd.read_csv('data/data2.csv')
+new_data = process_data(df, id_index=2, time_indexes=[0], minutes=10000000)
 old_data = np.zeros((27, 2))
 old_time = np.array(new_data[:int(27 * 2), 0]).reshape((27, 2))
 current_co2, current_time = update_data(new_data, old_data, old_time)

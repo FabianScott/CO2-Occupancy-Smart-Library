@@ -3,6 +3,8 @@ import pandas as pd
 from copy import copy
 from datetime import datetime
 from datetime import timedelta
+from scipy.stats import norm
+from constants import id_map
 
 
 def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
@@ -140,17 +142,11 @@ def process_data(df, minutes, time_indexes=None, id_index=1):
     if time_indexes is None:
         time_indexes = [0]
     data = np.array(df.values)
-    id_map = {'DA00110043': 1, 'DA00110044': 2, 'DA00110045': 3, 'DA00130002': 4, 'DA00130001': 5, 'DA00110031': 6,
-              'DA00110041': 7, 'DA00110047': 8, 'DA00110035': 9, 'DA00110049': 10, 'DA00110032': 11, 'AMNO-03': 12,
-              'DA00130004': 13, 'DA00110033': 14, 'AMNO-04': 15, 'DA00110037': 16, 'DA00130003': 17, 'AMNO-01': 18,
-              'AMNO-02': 19, 'DA00110040': 20, 'DA00100001': 21, 'DA00110036': 22, 'DA00110034': 23, 'DA00120001': 24,
-              'DA00110039': 25, 'DA00110042': 26, 'DA00110038': 27, }  # Must be verified
     # Convert all time strings to datetime to perform arithmetics on them
-    for i, index in enumerate(time_indexes):
-        for j, t in enumerate(data[:, index]):
-            t = t.replace('T', ':')[:-8]
+    for i, time_index in enumerate(time_indexes):
+        for j, t in enumerate(data[:, time_index]):
             # Convert to datetime object
-            data[j, index] = datetime.strptime(t, '%Y-%m-%d:%H:%M:%S')
+            data[j, time_index] = string_to_datetime(t)
             # Convert to number corresponding to zone
             if not i:  # Only map data once
                 data[j, id_index] = id_map[data[j, id_index]]
@@ -163,7 +159,13 @@ def process_data(df, minutes, time_indexes=None, id_index=1):
     return data
 
 
-def update_data(new_data, old_data, old_time, time_index=0, id_index=1, co2_index=2):
+def string_to_datetime(t):
+    t = t.replace('T', ':')[:-8]
+    # Convert to datetime object
+    return datetime.strptime(t, '%Y-%m-%d:%H:%M:%S')
+
+
+def update_data(new_data, old_data, old_time, time_index=0, co2_index=1, id_index=2):
     """
     Given the new rows of data in the PROCESSED FORMAT find the
     devices that have produced new co2 data. If they have produced
@@ -234,7 +236,7 @@ def summary_stats_datetime_difference(time1, time2, p=True):
 
 def exponential_moving_average(C, t, tau=900):
     """
-    Given CO2 measurements with creation time, return the value smoothed
+    Given CO2 measurements with creation time, return the values smoothed
     based on the previous measurements. Time window can be specified.
     :param C:
     :param t:
@@ -247,3 +249,74 @@ def exponential_moving_average(C, t, tau=900):
         w = np.exp(-(t[j] - t[j - 1]) / tau)
         smoothed[j] = smoothed[j - 1] * w + C[j] * (1 - w)
     return smoothed
+
+
+def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
+    """
+    Calculates the log log_likelihood of the current parameters, by
+    finding the pdf of the normal distribution with mean = the
+    measured CO2 level and standard deviation from the specifications.
+    Since we are calculating the log likelihood, we need to minimise.
+    Parameters being optimised are:
+        m       CO2 per person
+        C_out   CO2 concentration outdoors
+        Q       Airflow rate with outdoors (and neighbouring zones, to be implemented)
+    :param x:               parameters being optimised
+    :param C:               measured CO2 levels
+    :param N:               number of people
+    :param V:               volume of zone
+    :param dt:              time step
+    :param percent:         percent uncertainty of sensors
+    :param uncertainty:     minimum uncertainty of sensors
+    :return:
+    """
+    m, C_out, Q = x
+    uncertainty, percent = uncertainty / 2, percent / 2  # it is the 95 % confidence, therefor 2 sd's
+    Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
+
+    C_est = (Q * dt * C_out + m * N * dt) / (Q * dt + V) + Ci
+    # compare to C[1:] as there is no first estimate
+    sd = np.array([max(uncertainty, el * percent) for el in C[1:]])
+    log_l = sum(np.log(norm.pdf(C_est, loc=C[1:], scale=sd)))
+
+    # since the function is doing optimisation, we want it to find the largest
+    # number
+    return log_l
+
+
+def data_for_optimising(filename, newest_first=True, interval_smoothing=0):
+    """
+    Given the filename of a csv file with three columns, one with
+    device id's, one with co2 measurements and one with time of
+    measurement, return a list containing the measurements from
+    each device where the index in the list corresponds to the zone
+    number it is from.
+    :param filename:
+    :param newest_first:
+    :param interval_smoothing:
+    :return:
+    """
+    df = pd.read_csv(filename)
+    time_index = np.argmax(df.columns == 'telemetry.time')
+    co2_index = np.argmax(df.columns == 'telemetry.co2')
+    id_index = np.argmax(df.columns == 'deviceId')
+    # So indices correspond to zone number, the 0'th element will simply be empty
+    device_list = [[] for _ in range(28)]
+
+    first_time = df.values[0][time_index]
+
+    for row in df.values:
+        co2 = row[co2_index]
+        time = string_to_datetime(row[time_index])
+        device_list[id_map[row[id_index]]].append([time, co2])
+
+    if not newest_first:
+        for device in device_list:
+            if device:
+                device.sort(key=lambda x: (x[time_index]))
+
+    if interval_smoothing:
+
+        pass
+
+    return device_list
