@@ -234,16 +234,18 @@ def summary_stats_datetime_difference(time1, time2, p=True):
     return m, M, sd
 
 
-def exponential_moving_average(C, t, tau=900):
+def exponential_moving_average(x, tau=900):
     """
     Given CO2 measurements with creation time, return the values smoothed
     based on the previous measurements. Time window can be specified.
-    :param C:
-    :param t:
-    :param tau:
+    :param x:   contains time as first column and CO2 as second
+    :param tau: given in minutes
     :return:
     """
-    t = np.array([el.seconds for el in (t[0] - t)])
+    x = np.array(x)
+    print(x)
+    C, t = x[:, 1], x[:, 0]
+    t = np.array([el.min for el in (t[0] - t)])
     smoothed = [C[0] for _ in C]
     for j in range(1, len(t)):
         w = np.exp(-(t[j] - t[j - 1]) / tau)
@@ -284,7 +286,15 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
     return log_l
 
 
-def data_for_optimising(filename, newest_first=True, interval_smoothing=0):
+def round_dt(dt, minutes=15, up=False):
+    delta = timedelta(minutes=minutes)
+    if up:
+        return datetime.min + np.ceil((dt - datetime.min) / delta) * delta
+    else:
+        return datetime.min + np.floor((dt - datetime.min) / delta) * delta
+
+
+def data_for_optimising(filename, newest_first=False, interval_smoothing_length=0):
     """
     Given the filename of a csv file with three columns, one with
     device id's, one with co2 measurements and one with time of
@@ -293,7 +303,7 @@ def data_for_optimising(filename, newest_first=True, interval_smoothing=0):
     number it is from.
     :param filename:
     :param newest_first:
-    :param interval_smoothing:
+    :param interval_smoothing_length:
     :return:
     """
     df = pd.read_csv(filename)
@@ -303,20 +313,33 @@ def data_for_optimising(filename, newest_first=True, interval_smoothing=0):
     # So indices correspond to zone number, the 0'th element will simply be empty
     device_list = [[] for _ in range(28)]
 
-    first_time = df.values[0][time_index]
+    relevant_time, latest_time = string_to_datetime(df.values[0][time_index]) + timedelta(minutes=interval_smoothing_length), string_to_datetime(df.values[-1][time_index])
 
     for row in df.values:
         co2 = row[co2_index]
         time = string_to_datetime(row[time_index])
         device_list[id_map[row[id_index]]].append([time, co2])
+        if time < relevant_time:    # smaller time is earlier
+            relevant_time = time
 
     if not newest_first:
         for device in device_list:
             if device:
                 device.sort(key=lambda x: (x[time_index]))
 
-    if interval_smoothing:
-
+    if interval_smoothing_length:
+        relevant_time = round_dt(relevant_time, minutes=interval_smoothing_length, up=False)
+        data = device_list[1]
+        new_data = []
+        index = 0
+        while index < len(data):
+            temp = []
+            print(data[index][time_index], relevant_time)
+            while data[index][time_index] < relevant_time:
+                temp.append(data[index])
+                index += 1
+            new_data.append([relevant_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
+            relevant_time += timedelta(minutes=interval_smoothing_length)
         pass
 
     return device_list

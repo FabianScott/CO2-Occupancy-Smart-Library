@@ -6,7 +6,7 @@ from scipy.optimize import minimize, LinearConstraint, minimize_scalar, differen
 from Functions import data_for_optimising, exponential_moving_average, log_likelihood
 
 filename = 'data/data2.csv'
-device_list = data_for_optimising(filename)
+device_list = data_for_optimising(filename, interval_smoothing_length=15)
 
 q_min, q_max = (0, 10)
 m_min, m_max = (10, 20)
