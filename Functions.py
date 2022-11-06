@@ -313,14 +313,15 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
     # So indices correspond to zone number, the 0'th element will simply be empty
     device_list = [[] for _ in range(28)]
 
-    relevant_time, latest_time = string_to_datetime(df.values[0][time_index]) + timedelta(minutes=interval_smoothing_length), string_to_datetime(df.values[-1][time_index])
+    relevant_time = [datetime(year=9990, month=12, day=1) for _ in range(28)]
 
     for row in df.values:
         co2 = row[co2_index]
         time = string_to_datetime(row[time_index])
-        device_list[id_map[row[id_index]]].append([time, co2])
-        if time < relevant_time:    # smaller time is earlier
-            relevant_time = time
+        device_id = id_map[row[id_index]]
+        device_list[device_id].append([time, co2])
+        if time < relevant_time[device_id]:    # smaller time is earlier
+            relevant_time[device_id] = time
 
     if not newest_first:
         for device in device_list:
@@ -328,18 +329,18 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
                 device.sort(key=lambda x: (x[time_index]))
 
     if interval_smoothing_length:
-        relevant_time = round_dt(relevant_time, minutes=interval_smoothing_length, up=False)
-        data = device_list[1]
-        new_data = []
-        index = 0
-        while index < len(data):
-            temp = []
-            print(data[index][time_index], relevant_time)
-            while data[index][time_index] < relevant_time:
-                temp.append(data[index])
-                index += 1
-            new_data.append([relevant_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
-            relevant_time += timedelta(minutes=interval_smoothing_length)
-        pass
+        for i, device in enumerate(device_list[1:]):
+            relevant_time[i+1] = round_dt(relevant_time[i+1], minutes=interval_smoothing_length, up=False) + timedelta(minutes=interval_smoothing_length)
+            data = device_list[1]
+            new_data = []
+            index = 0
+            while index < len(data):
+                temp = []
+                while data[index][time_index] < relevant_time[i+1]:
+                    temp.append(data[index])
+                    index += 1
+                new_data.append([relevant_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
+                relevant_time += timedelta(minutes=interval_smoothing_length)
+            pass
 
     return device_list
