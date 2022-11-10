@@ -301,7 +301,7 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
     return estimates, E_est_list
 
 
-def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
+def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
     """
     Calculates the log log_likelihood of the current parameters, by
     finding the pdf of the normal distribution with mean = the
@@ -318,6 +318,7 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
     :param dt:              time step
     :param percent:         percent uncertainty of sensors
     :param uncertainty:     minimum uncertainty of sensors
+    :param verbose:         to print or not to print
     :return:
     """
     m, C_out, Q = x
@@ -325,13 +326,44 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
 
     C_est = (Q * dt * C_out + m * N * dt) / (Q * dt + V) + Ci
-    # compare to C[1:] as there is no first estimate
+
     sd = np.array([max(uncertainty, el * percent) for el in C[1:]])
     log_l = sum(np.log(norm.pdf(C_est, loc=C[1:], scale=sd)))
 
-    # since the function is doing optimisation, we want it to find the largest
-    # number
-    return log_l
+    if verbose:
+        print(f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
+        print(f'log_likelihood: {log_l}')
+
+    # This will return the negative log likelihood as we are minimising
+    return -log_l
+
+
+def calculate_co2_estimate(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
+    """
+    Calculates the log log_likelihood of the current parameters, by
+    finding the pdf of the normal distribution with mean = the
+    measured CO2 level and standard deviation from the specifications.
+    Since we are calculating the log likelihood, we need to minimise.
+    Parameters being optimised are:
+        m       CO2 per person
+        C_out   CO2 concentration outdoors
+        Q       Airflow rate with outdoors (and neighbouring zones, to be implemented)
+    :param x:               parameters being optimised
+    :param C:               measured CO2 levels
+    :param N:               number of people
+    :param V:               volume of zone
+    :param dt:              time step
+    :param percent:         percent uncertainty of sensors
+    :param uncertainty:     minimum uncertainty of sensors
+    :param verbose:         to print or not to print
+    :return:
+    """
+    m, C_out, Q = x
+    Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
+
+    C_est = (Q * dt * C_out + m * N * dt) / (Q * dt + V) + Ci
+
+    return C_est
 
 
 def round_dt(dt, minutes=15, up=False):
@@ -354,41 +386,58 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
     :param interval_smoothing_length:
     :return:
     """
+
     df = pd.read_csv(filename)
     time_index = np.argmax(df.columns == 'telemetry.time')
     co2_index = np.argmax(df.columns == 'telemetry.co2')
     id_index = np.argmax(df.columns == 'deviceId')
     # So indices correspond to zone number, the 0'th element will simply be empty
-    device_list = [[] for _ in range(28)]
+    device_data_list = [[] for _ in range(28)]
 
     relevant_time = [datetime(year=9990, month=12, day=1) for _ in range(28)]
+    interval_smoothing_length = 15
 
     for row in df.values:
         co2 = row[co2_index]
         time = string_to_datetime(row[time_index])
         device_id = id_map[row[id_index]]
-        device_list[device_id].append([time, co2])
-        if time < relevant_time[device_id]:    # smaller time is earlier
+        device_data_list[device_id].append([time, co2])
+        if time < relevant_time[device_id]:  # smaller time is earlier
             relevant_time[device_id] = time
 
-    if not newest_first:
-        for device in device_list:
-            if device:
-                device.sort(key=lambda x: (x[time_index]))
+    for i, device in enumerate(device_data_list[1:]):
+        i_d = i + 1  # Simplify
 
-    if interval_smoothing_length:
-        for i, device in enumerate(device_list[1:]):
-            relevant_time[i+1] = round_dt(relevant_time[i+1], minutes=interval_smoothing_length, up=False) + timedelta(minutes=interval_smoothing_length)
-            data = device_list[1]
-            new_data = []
-            index = 0
-            while index < len(data):
-                temp = []
-                while data[index][time_index] < relevant_time[i+1]:
-                    temp.append(data[index])
-                    index += 1
+        # To start we want all measurements up to 15 minutes after the rounded first time
+        relevant_time[i_d] = round_dt(relevant_time[i_d], minutes=interval_smoothing_length, up=False) \
+                             + timedelta(minutes=interval_smoothing_length)
+        data = np.array(device_data_list[i_d])
+        # Skip sensors with no data sent
+        if len(data) == 0:
+            continue
+
+        # sort data by time
+        data = data[data[:, time_index].argsort()]
+        # initialise variables
+        new_data, index = [], 0
+
+        while index < len(data):
+
+            temp = []
+            # print(f'The index is now: {index}, relevant time is: {relevant_time[i_d]}')
+            # append all data points created before relevant time to temp
+            while data[index][time_index] < relevant_time[i_d]:
+                temp.append(data[index])
+                index += 1
+                if index == len(data):  # quick fix for out of bounds
+                    break
+
+            # Check if there was any data
+            if temp:
                 new_data.append([relevant_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
-                relevant_time += timedelta(minutes=interval_smoothing_length)
-            pass
+            else:  # Empty list if nothing recorded in the period
+                new_data.append([])
+            # Increment relevant time
+            relevant_time[i_d] = relevant_time[i_d] + timedelta(minutes=interval_smoothing_length)
 
-    return device_list
+    return device_data_list
