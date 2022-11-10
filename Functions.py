@@ -237,20 +237,68 @@ def summary_stats_datetime_difference(time1, time2, p=True):
 def exponential_moving_average(x, tau=900):
     """
     Given CO2 measurements with creation time, return the values smoothed
-    based on the previous measurements. Time window can be specified.
+    based on the previous measurements. tau specifies the weight given to
+    past measurements, the larger the more stable and further in the past
+    is weighted higher and vice versa.
     :param x:   contains time as first column and CO2 as second
-    :param tau: given in minutes
+    :param tau: given in seconds
     :return:
     """
     x = np.array(x)
-    print(x)
     C, t = x[:, 1], x[:, 0]
-    t = np.array([el.min for el in (t[0] - t)])
+    # total seconds is necessary for robustness
+    t = np.array([el.total_seconds() for el in (t[-1] - t)])
     smoothed = [C[0] for _ in C]
     for j in range(1, len(t)):
-        w = np.exp(-(t[j] - t[j - 1]) / tau)
+        w = np.exp(-(t[j - 1] - t[j]) / tau)
+
         smoothed[j] = smoothed[j - 1] * w + C[j] * (1 - w)
     return smoothed
+
+
+def kalman_estimates(C, min_error=50, error_proportion=0.03):
+    """
+    Given a list of observations and the error values relevant for CO2,
+    compute the kalman filtered value and error for each consecutive
+    data point. No time is considered, only error.
+    :param C:
+    :param min_error:
+    :param error_proportion:
+    :return:
+    """
+    # Vocab:    E_est: estimate error
+    #           EST:   estimate
+    #           E_est_p: previous estimate error
+    # remove first element to make code look nicer
+    EST = C[0]
+    C = C[1:]
+    # initial error
+    E_est = max(EST * error_proportion, min_error)
+    E_est_list = np.array([E_est] + [0 for _ in range(len(C))], dtype=float)
+    E_m_list = []
+    KGs = np.empty(len(C))
+
+    estimates = np.array([EST] + [0 for _ in range(len(C))])
+
+    for i, m in enumerate(C):
+        # Define previous and measurement errors:
+        E_est_p = E_est_list[i]
+        E_m = max(m*error_proportion, min_error)
+        E_m_list.append(E_m)
+        # Calculate the Kalman Gain (KG)
+        EST_p = estimates[i]
+        KG = E_est_p/(E_est_p + E_m)
+        KGs[i] = KG
+
+        # The new error can be calculated using the Kalman Gain as:
+        E_est = (1-KG)*E_est_p
+        E_est_list[i + 1] = E_est
+        # Calculate the new estimate using KG:
+        EST = EST_p + KG*(m - EST_p)
+        estimates[i + 1] = EST
+        # print(f'{i}, KG={KG}, E_EST_p={E_est_p}, E_est={E_est} m={m}')
+
+    return estimates, E_est_list
 
 
 def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03):
