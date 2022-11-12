@@ -323,22 +323,23 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
     :param verbose:         to print or not to print
     :return:
     """
-    Q, m, C_out = x
     uncertainty, percent = uncertainty / 2, percent / 2  # it is the 95 % confidence, therefor 2 sd's
-    Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
 
-    C_est = np.array((dt*(Q*C_out + m*N) + V*Ci)/(Q*dt + V), dtype=np.longdouble)
+    C_est = calculate_co2_estimate(x, C, N, V, dt)
     sd = np.array([uncertainty + el * percent for el in C[1:]])
     log_l = sum(np.log(norm.pdf(C_est, loc=C[1:], scale=sd)))
     if verbose:
         print(f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
         print(f'log_likelihood: {log_l}')
+        print(f'Paramters: {x}')
+        print(f'Average C: {np.average(C)}')
+        print(f'Average C_est: {np.average(C_est)}')
 
     # This will return the negative log likelihood as we are minimising
     return -log_l
 
 
-def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None):
+def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None, rho=1.22):
     """
     Calculates the estimated CO2 given parameters
     :param x:               Q, m and C_out
@@ -347,6 +348,7 @@ def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None):
     :param V:               volume of zone
     :param dt:              time step
     :param d:
+    :param rho:
     :param no_steps:       to be iterated over for generation, assume same time step
     :return:
     """
@@ -358,7 +360,7 @@ def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None):
             C_est.append((dt*(Q*C_out + m*N[i + 1]) + V*C_est[i])/(Q*dt + V))
     else:
         Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
-        C_est = (dt*(Q*C_out + m*N) + V*Ci)/(Q*dt + V)
+        C_est = np.array((dt*(Q*C_out + m*N*rho) + V*Ci*rho)/(Q*dt + rho*V), dtype=np.longdouble)
 
     return np.round(C_est, decimals=d)
 
@@ -440,7 +442,7 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
     return device_data_list
 
 
-def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None, verbosity=True):
+def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None, verbosity=True, method=None, plot_result=False):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -450,8 +452,9 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
     :param V:
     :param dt: 
     :param bounds: 
-    :param verbosity: 
-    :return: 
+    :param verbosity:
+    :param method:
+    :return:
     """
     if bounds is None:
         q_min, q_max = (0.01, 0.2)
@@ -474,7 +477,7 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
             c = np.array(device[:, 1], dtype=float)
             V = V[i]
             if N is None:
-                n = np.array(np.random.randint(0, 3, size=len(c)), dtype=int)
+                n = np.array(np.random.randint(8, 15, size=len(c)), dtype=int)
             else:
                 n = N[i]
 
@@ -482,9 +485,19 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
                 log_likelihood,
                 x0=x,
                 args=(c, n, V, dt, verbosity,),
-                bounds=bounds
+                bounds=bounds,
+                method=method
             )
 
+            C_est = calculate_co2_estimate(minimised.x, c, n, V, dt)
+            if plot_result:
+                plt.plot(np.arange(0, len(C_est)*dt/60, dt/60), c[1:])
+                plt.plot(np.arange(0, len(C_est)*dt/60, dt/60), C_est)
+                plt.legend(['Original', 'Estimate'])
+                plt.ylabel('CO2 concentration (ppm)')
+                plt.xlabel('Time (min)')
+                plt.title('Measured CO2 level vs estimate from optimisation')
+                plt.show()
             parameters.append(minimised.x)
         elif i != 0:
             print(f'No data from zone {i}')
@@ -493,8 +506,9 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
 
 def simulate_office():
     parameter_mat = np.empty(shape=(4, 3))
-    co2_pp, c_out = 10, 380
-    qi, qm, qw = 0.05, 0.4, 0.2
+    co2_scaling = 1
+    co2_pp, c_out = 15, 380/co2_scaling
+    qi, qm, qw = 0.05, 4, 0.5
     parameter_mat[0] = np.array([0, co2_pp, c_out])  # No q
     parameter_mat[1] = np.array([qi, co2_pp, c_out])  # infiltration
     parameter_mat[2] = np.array([qi + qm, co2_pp, c_out])  # infiltration + mechanical ventilation
@@ -502,15 +516,16 @@ def simulate_office():
 
     no_steps = 10000
     no_hours = 1
+    hour_scaling = 3600
     volume = 100
     no_people = 1
-    Cg, Ng = 450, np.ones(no_steps) * no_people
+    Cg, Ng = 450/co2_scaling, np.ones(no_steps) * no_people
 
     for parameter_set in parameter_mat:
-        step = no_hours * 60 * 60 / no_steps
+        step = no_hours * hour_scaling / no_steps
         plt.plot(
-            np.arange(0, no_hours * 60 * 60, step),
-            calculate_co2_estimate(parameter_set, Cg, Ng, V=volume, dt=step, no_steps=no_steps)
+            np.arange(0, no_hours * hour_scaling, step),
+            co2_scaling*calculate_co2_estimate(parameter_set, Cg, Ng, V=volume, dt=step, no_steps=no_steps)
         )
 
     plt.legend([f'Nothing (Q={0})',
@@ -518,8 +533,8 @@ def simulate_office():
                 f'Mechanical (Q={qi+qm})',
                 f'Window (Q={qi + qm+ qw})'])
     plt.title(f'CO2 level vs time in an office of volume={volume} occupied by {no_people} person(s)\n '
-              f'CO2 per person={co2_pp} CO2 outdoors={c_out} simulated for {no_hours} hour(s)')
+              f'CO2 per person={co2_pp} CO2 outdoors={c_out}')
     plt.ylabel('CO2 concentration (ppm)')
-    plt.xlabel(f'Time in (s)')
+    plt.xlabel(f'Time ({"hours" if hour_scaling == 1 else "seconds"})')
     plt.show()
 
