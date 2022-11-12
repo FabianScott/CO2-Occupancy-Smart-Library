@@ -5,6 +5,8 @@ from datetime import datetime
 from datetime import timedelta
 from scipy.stats import norm
 from constants import id_map
+from scipy.optimize import minimize
+import matplotlib.pyplot as plt
 
 
 def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
@@ -321,15 +323,13 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
     :param verbose:         to print or not to print
     :return:
     """
-    m, C_out, Q = x
+    Q, m, C_out = x
     uncertainty, percent = uncertainty / 2, percent / 2  # it is the 95 % confidence, therefor 2 sd's
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
 
-    C_est = (Q * dt * C_out + m * N * dt) / (Q * dt + V) + Ci
-
-    sd = np.array([max(uncertainty, el * percent) for el in C[1:]])
+    C_est = np.array((dt*(Q*C_out + m*N) + V*Ci)/(Q*dt + V), dtype=np.longdouble)
+    sd = np.array([uncertainty + el * percent for el in C[1:]])
     log_l = sum(np.log(norm.pdf(C_est, loc=C[1:], scale=sd)))
-
     if verbose:
         print(f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
         print(f'log_likelihood: {log_l}')
@@ -338,32 +338,29 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
     return -log_l
 
 
-def calculate_co2_estimate(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
+def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None):
     """
-    Calculates the log log_likelihood of the current parameters, by
-    finding the pdf of the normal distribution with mean = the
-    measured CO2 level and standard deviation from the specifications.
-    Since we are calculating the log likelihood, we need to minimise.
-    Parameters being optimised are:
-        m       CO2 per person
-        C_out   CO2 concentration outdoors
-        Q       Airflow rate with outdoors (and neighbouring zones, to be implemented)
-    :param x:               parameters being optimised
+    Calculates the estimated CO2 given parameters
+    :param x:               Q, m and C_out
     :param C:               measured CO2 levels
     :param N:               number of people
     :param V:               volume of zone
     :param dt:              time step
-    :param percent:         percent uncertainty of sensors
-    :param uncertainty:     minimum uncertainty of sensors
-    :param verbose:         to print or not to print
+    :param d:
+    :param no_steps:       to be iterated over for generation, assume same time step
     :return:
     """
-    m, C_out, Q = x
-    Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
+    Q, m, C_out = x
+    if no_steps is not None:  # C is then the first CO2 value
+        C_est = [C]
+        for i in range(no_steps - 1):
+            # i is then the previous index in C_est
+            C_est.append((dt*(Q*C_out + m*N[i + 1]) + V*C_est[i])/(Q*dt + V))
+    else:
+        Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
+        C_est = (dt*(Q*C_out + m*N) + V*Ci)/(Q*dt + V)
 
-    C_est = (Q * dt * C_out + m * N * dt) / (Q * dt + V) + Ci
-
-    return C_est
+    return np.round(C_est, decimals=d)
 
 
 def round_dt(dt, minutes=15, up=False):
@@ -441,3 +438,88 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
             relevant_time[i_d] = relevant_time[i_d] + timedelta(minutes=interval_smoothing_length)
 
     return device_data_list
+
+
+def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None, verbosity=True):
+    """
+    Given data in the format from the above function and potentially
+    vectors representing the occupancy and volumes, find the optimal
+    Q, m and CO2 concentration outdoors
+    :param device_data_list:
+    :param N:
+    :param V:
+    :param dt: 
+    :param bounds: 
+    :param verbosity: 
+    :return: 
+    """
+    if bounds is None:
+        q_min, q_max = (0.01, 0.2)
+        m_min, m_max = (10, 20)
+        c_min, c_max = (300, 450)
+
+        bounds = ((q_min, q_max), (m_min, m_max), (c_min, c_max))
+
+    x = np.array([bounds[0][0] - (bounds[0][0] - bounds[0][1]) / 2,
+                  bounds[1][0] - (bounds[1][0] - bounds[1][1]) / 2,
+                  bounds[2][0] - (bounds[2][0] - bounds[2][1]) / 2, ])
+    if V is None:
+        V = np.ones(len(device_data_list)) * 150
+
+    parameters = []
+    np.random.seed(41)
+    for i, device in enumerate(device_data_list[:2]):
+        if device:
+            device = np.array(device)
+            c = np.array(device[:, 1], dtype=float)
+            V = V[i]
+            if N is None:
+                n = np.array(np.random.randint(0, 3, size=len(c)), dtype=int)
+            else:
+                n = N[i]
+
+            minimised = minimize(
+                log_likelihood,
+                x0=x,
+                args=(c, n, V, dt, verbosity,),
+                bounds=bounds
+            )
+
+            parameters.append(minimised.x)
+        elif i != 0:
+            print(f'No data from zone {i}')
+    return parameters
+
+
+def simulate_office():
+    parameter_mat = np.empty(shape=(4, 3))
+    co2_pp, c_out = 10, 380
+    qi, qm, qw = 0.05, 0.4, 0.2
+    parameter_mat[0] = np.array([0, co2_pp, c_out])  # No q
+    parameter_mat[1] = np.array([qi, co2_pp, c_out])  # infiltration
+    parameter_mat[2] = np.array([qi + qm, co2_pp, c_out])  # infiltration + mechanical ventilation
+    parameter_mat[3] = np.array([qi + qm + qw, co2_pp, c_out])  # infiltration + mechanical ventilation + window
+
+    no_steps = 10000
+    no_hours = 1
+    volume = 100
+    no_people = 1
+    Cg, Ng = 450, np.ones(no_steps) * no_people
+
+    for parameter_set in parameter_mat:
+        step = no_hours * 60 * 60 / no_steps
+        plt.plot(
+            np.arange(0, no_hours * 60 * 60, step),
+            calculate_co2_estimate(parameter_set, Cg, Ng, V=volume, dt=step, no_steps=no_steps)
+        )
+
+    plt.legend([f'Nothing (Q={0})',
+                f'Infiltration (Q={qi})',
+                f'Mechanical (Q={qi+qm})',
+                f'Window (Q={qi + qm+ qw})'])
+    plt.title(f'CO2 level vs time in an office of volume={volume} occupied by {no_people} person(s)\n '
+              f'CO2 per person={co2_pp} CO2 outdoors={c_out} simulated for {no_hours} hour(s)')
+    plt.ylabel('CO2 concentration (ppm)')
+    plt.xlabel(f'Time in (s)')
+    plt.show()
+
