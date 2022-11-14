@@ -333,7 +333,7 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
         print(f'log_likelihood: {log_l}')
         print(f'Paramters: {x}')
         print(f'Average C: {np.average(C)}')
-        print(f'Average C_est: {np.average(C_est)}')
+        print(f'Average C_est: {np.average(C_est)}\n\n')
 
     # This will return the negative log likelihood as we are minimising
     return -log_l
