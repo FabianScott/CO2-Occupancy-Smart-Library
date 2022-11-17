@@ -36,8 +36,8 @@ def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
         # Calculate mean from the estimate where only zones with data are included
         mean = np.average(N_estimated[N_estimated != 0])
         # Use this to spread out the mean to those unknown zones
-        n_unknown = len(N_estimated)-np.count_nonzero(N_estimated)
-        N_estimated[N_estimated != 0] -= n_unknown/(len(N_estimated)-n_unknown) * mean
+        n_unknown = len(N_estimated) - np.count_nonzero(N_estimated)
+        N_estimated[N_estimated != 0] -= n_unknown / (len(N_estimated) - n_unknown) * mean
         N_estimated[N_estimated == 0] = mean
     return N_estimated.round(decimals)
 
@@ -48,7 +48,8 @@ def mass_balance_helper(X):
     return N
 
 
-def mass_balance(C, Q, V, n_total, current_time=[], n_map=None, C_out=420, alpha=0.7, time_step=5*60, m=20, decimals=0, M=None, fill_neighbours=False):
+def mass_balance(C, Q, V, n_total, current_time=[], n_map=None, C_out=420, alpha=0.7, time_step=5 * 60, m=20,
+                 decimals=0, M=None, fill_neighbours=False):
     """
     This function calculates the derivative of Ci, creates the replacement
     CO2 vector from the neighbour map (n_map) and calculates the estimated
@@ -104,7 +105,7 @@ def mass_balance(C, Q, V, n_total, current_time=[], n_map=None, C_out=420, alpha
     return N_estimated.round(decimals)
 
 
-def get_replacement_and_derivative(C, C_out, time_step=5*60, alpha=0.05, n_map=None):
+def get_replacement_and_derivative(C, C_out, time_step=5 * 60, alpha=0.05, n_map=None):
     if n_map is None:
         n_map = {1: [2, 10], 2: [1, 3], 3: [2, 4], 4: [2, 5], 5: [4, 6], 6: [5, 7], 7: [6, 8], 8: [7, 9], 9: [8, 10],
                  10: [1, 9], 11: [12, 20], 12: [11, 13], 13: [12, 14], 14: [13, 15], 15: [14, 16], 16: [15, 17],
@@ -211,7 +212,7 @@ def level_from_estimate(N, M, treshs=(0.3, 0.7)):
     """
 
     percentage = N / M
-    output = [0 if p == 0 else(1 if p < treshs[0] else (2 if p < treshs[1] else 3)) for p in percentage]
+    output = [0 if p == 0 else (1 if p < treshs[0] else (2 if p < treshs[1] else 3)) for p in percentage]
 
     return output
 
@@ -285,18 +286,18 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
     for i, m in enumerate(C):
         # Define previous and measurement errors:
         E_est_p = E_est_list[i]
-        E_m = max(m*error_proportion, min_error)
+        E_m = max(m * error_proportion, min_error)
         E_m_list.append(E_m)
         # Calculate the Kalman Gain (KG)
         EST_p = estimates[i]
-        KG = E_est_p/(E_est_p + E_m)
+        KG = E_est_p / (E_est_p + E_m)
         KGs[i] = KG
 
         # The new error can be calculated using the Kalman Gain as:
-        E_est = (1-KG)*E_est_p
+        E_est = (1 - KG) * E_est_p
         E_est_list[i + 1] = E_est
         # Calculate the new estimate using KG:
-        EST = EST_p + KG*(m - EST_p)
+        EST = EST_p + KG * (m - EST_p)
         estimates[i + 1] = EST
         # print(f'{i}, KG={KG}, E_EST_p={E_est_p}, E_est={E_est} m={m}')
 
@@ -329,7 +330,8 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
     sd = np.array([uncertainty + el * percent for el in C[1:]])
     log_l = sum(np.log(norm.pdf(C_est, loc=C[1:], scale=sd)))
     if verbose:
-        print(f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
+        print(
+            f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
         print(f'log_likelihood: {log_l}')
         print(f'Paramters: {x}')
         print(f'Average C: {np.average(C)}')
@@ -357,12 +359,54 @@ def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None, rho=1.22):
         C_est = [C]
         for i in range(no_steps - 1):
             # i is then the previous index in C_est
-            C_est.append((dt*(Q*C_out + m*N[i + 1]) + V*C_est[i])/(Q*dt + V))
+            C_est.append((dt * (Q * C_out + m * N[i + 1]) + V * C_est[i]) / (Q * dt + V))
     else:
         Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
-        C_est = np.array((dt*(Q*C_out + m*N*rho) + V*Ci*rho)/(Q*dt + rho*V), dtype=np.longdouble)
+        C_est = np.array((dt * (Q * C_out + m * N * rho) + V * Ci * rho) / (Q * dt + rho * V), dtype=np.longdouble)
 
     return np.round(C_est, decimals=d)
+
+
+def calculate_n_estimate(x, C, V, dt, d=0, rho=1.22):
+    """
+    Given all necessary parameters, calculate the estimated
+    number of occupants in a zone. Can take scalars and vector
+    as long as C is a vector of length at least 2 containing
+    previous and current CO2.
+    :param x:
+    :param C:
+    :param V:
+    :param dt:
+    :param d:
+    :param rho:
+    :return:
+    """
+    Q, m, C_out = x
+    Ci = C[:-1]
+    C = C[1:]
+    N = (V * (C - Ci) * rho + Q * (C - C_out) * dt) \
+        / (dt * rho * m)
+
+    return np.round(N, d)
+
+
+def error_fraction(true_values, estimated_values, d=2):
+    """
+    Given the true and estimated values, return the proportion of
+    time steps where they do not match and the average error.
+    :param true_values:
+    :param estimated_values:
+    :return:
+    """
+
+    true_values = true_values[1:]
+    n_false = 0
+    error_size = 0
+    for i, el in enumerate(estimated_values):
+        n_false += not true_values[i] == el
+        error_size += abs(true_values[i] - el)
+
+    return np.round(n_false / len(true_values),d), np.round(error_size / len(true_values),d)
 
 
 def round_dt(dt, minutes=15, up=False):
@@ -442,7 +486,8 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
     return device_data_list
 
 
-def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None, verbosity=True, method=None, plot_result=False):
+def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None, verbosity=True, method=None,
+                       plot_result=False):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -490,14 +535,28 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
             )
 
             C_est = calculate_co2_estimate(minimised.x, c, n, V, dt)
+            N_est = calculate_n_estimate(minimised.x, c, V, dt)
+
             if plot_result:
-                plt.plot(np.arange(0, len(C_est)*dt/60, dt/60), c[1:])
-                plt.plot(np.arange(0, len(C_est)*dt/60, dt/60), C_est)
-                plt.legend(['Original', 'Estimate'])
+                ax1 = plt.subplot()
+                x_vals = np.arange(0, len(C_est) * dt / 60, dt / 60)
+                ax1.plot(x_vals, c[1:])
+                ax1.plot(x_vals, C_est)
                 plt.ylabel('CO2 concentration (ppm)')
                 plt.xlabel('Time (min)')
+
+                # x_vals = np.arange(0, len(N_est))
+                ax2 = ax1.twinx()
+                ax2.plot(x_vals, n[1:], color='y')
+                ax2.scatter(x_vals, N_est, color='r', s=0.5)
+
+                ax1.legend(['N true', 'N Estimated'], loc='upper center')
+                ax2.legend(['CO2 true', 'CO2 Estimated'], loc='upper right')
+
                 plt.title('Measured CO2 level vs estimate from optimisation')
                 plt.show()
+            print(f'Average CO2 Error: {error_fraction(c, C_est)[1]}\n'
+                  f'Occupancy error (proportion wrong, average error): {error_fraction(n, N_est)}')
             parameters.append(minimised.x)
         elif i != 0:
             print(f'No data from zone {i}')
@@ -507,7 +566,7 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
 def simulate_office():
     parameter_mat = np.empty(shape=(4, 3))
     co2_scaling = 1
-    co2_pp, c_out = 15, 380/co2_scaling
+    co2_pp, c_out = 15, 380 / co2_scaling
     qi, qm, qw = 0.05, 4, 0.5
     parameter_mat[0] = np.array([0, co2_pp, c_out])  # No q
     parameter_mat[1] = np.array([qi, co2_pp, c_out])  # infiltration
@@ -519,22 +578,21 @@ def simulate_office():
     hour_scaling = 3600
     volume = 100
     no_people = 1
-    Cg, Ng = 450/co2_scaling, np.ones(no_steps) * no_people
+    Cg, Ng = 450 / co2_scaling, np.ones(no_steps) * no_people
 
     for parameter_set in parameter_mat:
         step = no_hours * hour_scaling / no_steps
         plt.plot(
             np.arange(0, no_hours * hour_scaling, step),
-            co2_scaling*calculate_co2_estimate(parameter_set, Cg, Ng, V=volume, dt=step, no_steps=no_steps)
+            co2_scaling * calculate_co2_estimate(parameter_set, Cg, Ng, V=volume, dt=step, no_steps=no_steps)
         )
 
     plt.legend([f'Nothing (Q={0})',
                 f'Infiltration (Q={qi})',
-                f'Mechanical (Q={qi+qm})',
-                f'Window (Q={qi + qm+ qw})'])
+                f'Mechanical (Q={qi + qm})',
+                f'Window (Q={qi + qm + qw})'])
     plt.title(f'CO2 level vs time in an office of volume={volume} occupied by {no_people} person(s)\n '
               f'CO2 per person={co2_pp} CO2 outdoors={c_out}')
     plt.ylabel('CO2 concentration (ppm)')
     plt.xlabel(f'Time ({"hours" if hour_scaling == 1 else "seconds"})')
     plt.show()
-
