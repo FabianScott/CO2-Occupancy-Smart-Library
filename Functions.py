@@ -256,7 +256,9 @@ def exponential_moving_average(x, tau=900):
         w = np.exp(-(t[j - 1] - t[j]) / tau)
 
         smoothed[j] = smoothed[j - 1] * w + C[j] * (1 - w)
-    return smoothed
+
+    # return the last element as this is the newest estimate
+    return smoothed[-1]
 
 
 def kalman_estimates(C, min_error=50, error_proportion=0.03):
@@ -339,6 +341,39 @@ def log_likelihood(x, C, N, V, dt, uncertainty=50, percent=0.03, verbose=True):
 
     # This will return the negative log likelihood as we are minimising
     return -log_l
+
+
+def abs_distance(x, C, N, V, dt, verbose=True):
+    """
+    Calculates the log log_likelihood of the current parameters, by
+    finding the pdf of the normal distribution with mean = the
+    measured CO2 level and standard deviation from the specifications.
+    Since we are calculating the log likelihood, we need to minimise.
+    Parameters being optimised are:
+        m       CO2 per person
+        C_out   CO2 concentration outdoors
+        Q       Airflow rate with outdoors (and neighbouring zones, to be implemented)
+    :param x:               parameters being optimised
+    :param C:               measured CO2 levels
+    :param N:               number of people
+    :param V:               volume of zone
+    :param dt:              time step
+    :param verbose:         to print or not to print
+    :return:
+    """
+
+    C_est = calculate_co2_estimate(x, C, N, V, dt)
+    dist = sum(np.abs(C[1:] - C_est))
+    if verbose:
+        print(
+            f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
+        print(f'Average Squared Distance: {dist}')
+        print(f'Parameters: {x}')
+        print(f'Average C: {np.average(C)}')
+        print(f'Average C_est: {np.average(C_est)}\n\n')
+
+    # This will return the negative log likelihood as we are minimising
+    return dist
 
 
 def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None, rho=1.22):
@@ -477,11 +512,14 @@ def data_for_optimising(filename, newest_first=False, interval_smoothing_length=
 
             # Check if there was any data
             if temp:
-                new_data.append([relevant_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
+                new_data.append([relevant_time[i_d], exponential_moving_average(temp, tau=interval_smoothing_length)])
             else:  # Empty list if nothing recorded in the period
                 new_data.append([])
             # Increment relevant time
+            print(relevant_time[i_d])
             relevant_time[i_d] = relevant_time[i_d] + timedelta(minutes=interval_smoothing_length)
+
+        device_data_list[i_d] = new_data
 
     return device_data_list
 
@@ -516,26 +554,43 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
 
     parameters = []
     np.random.seed(41)
-    for i, device in enumerate(device_data_list[:2]):
+    for i, device in enumerate(device_data_list):
         if device:
-            device = np.array(device)
-            c = np.array(device[:, 1], dtype=float)
-            V = V[i]
+            c = []
+            # Do fix this
+            for el in device:
+                if el:
+                    c.append(el[1])
+                else:
+                    if c[-1]:
+                        c.append(c[-1])
+                    else:
+                        c.append(550)
+            c = np.array(c, dtype=float)
+            v = V[i]
             if N is None:
-                n = np.array(np.random.randint(8, 15, size=len(c)), dtype=int)
+                m1, m2, m3 = 33, 33+50, len(c)
+                l1 = [0 for _ in range(m1)] + [4 for _ in range(m1, m2)] + [1 for _ in range(m2, m3)]
+
+                n = np.array(l1, dtype=int)
+
             else:
                 n = N[i]
 
             minimised = minimize(
-                log_likelihood,
+                abs_distance,
                 x0=x,
-                args=(c, n, V, dt, verbosity,),
+                args=(c, n, v, dt, verbosity,),
                 bounds=bounds,
                 method=method
             )
 
-            C_est = calculate_co2_estimate(minimised.x, c, n, V, dt)
-            N_est = calculate_n_estimate(minimised.x, c, V, dt)
+            C_est = calculate_co2_estimate(minimised.x, c, n, v, dt)
+            N_est = calculate_n_estimate(minimised.x, c, v, dt)
+            error_c = error_fraction(c, C_est)[1]
+            error_n = error_fraction(n, N_est)
+            print(f'Average CO2 Error: {error_c}\n'
+                  f'Occupancy error (proportion wrong, average error): {error_n}')
 
             if plot_result:
                 ax1 = plt.subplot()
@@ -550,13 +605,11 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
                 ax2.plot(x_vals, n[1:], color='y')
                 ax2.scatter(x_vals, N_est, color='r', s=0.5)
 
-                ax1.legend(['N true', 'N Estimated'], loc='upper center')
-                ax2.legend(['CO2 true', 'CO2 Estimated'], loc='upper right')
+                ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
+                ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
 
-                plt.title('Measured CO2 level vs estimate from optimisation')
+                plt.title(f'Measured CO2 level vs estimate from optimisation\nAvg. CO2 error: {error_c}, N error: {error_n}')
                 plt.show()
-            print(f'Average CO2 Error: {error_fraction(c, C_est)[1]}\n'
-                  f'Occupancy error (proportion wrong, average error): {error_fraction(n, N_est)}')
             parameters.append(minimised.x)
         elif i != 0:
             print(f'No data from zone {i}')
