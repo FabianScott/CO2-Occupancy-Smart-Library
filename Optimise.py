@@ -1,10 +1,8 @@
-import numpy as np
-from Functions import data_for_optimising, optimise_occupancy, simulate_office
+from Functions import load_data, optimise_occupancy, check_missing_data
 
-dT = 15 * 60
-filename = 'data/data2.csv'
-device_data_list = data_for_optimising(filename, interval_smoothing_length=dT / 60)
+filename = 'data/data3.csv'
+dT = 15  # in minutes
+device_data_list = load_data(filename, interval_smoothing_length=dT)
+
+# check_missing_data(device_data_list, replace=True)
 parameters = optimise_occupancy(device_data_list, method='Nelder-Mead', plot_result=True)
-# print(np.array(parameters))
-
-# simulate_office()
