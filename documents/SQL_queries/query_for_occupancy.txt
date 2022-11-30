@@ -1,0 +1,2 @@
+select "telemetry.time", "deviceId", "telemetry.co2"
+from [dbo].[AmbiNode] where "telemetry.time" between '2022-11-24 10:44:00' and '2022-11-24 15:45:00' order by "IdPxKey" desc
