@@ -422,8 +422,8 @@ def calculate_n_estimate(x, C, V, dt, d=0, rho=1.22):
     Q, m, C_out = x
     Ci = C[:-1]
     C = C[1:]
-    N = (V * (C - Ci) * rho + Q * (C - C_out) * dt) \
-        / (dt * rho * m)
+    N = np.array((V * (C - Ci) * rho + Q * (C - C_out) * dt) \
+                 / (dt * rho * m), dtype=float)
 
     return np.round(N, d)
 
@@ -444,7 +444,7 @@ def error_fraction(true_values, estimated_values, d=2):
         n_false += not true_values[i] == el
         error_size += abs(true_values[i] - el)
 
-    return np.round(n_false / len(true_values),d), np.round(error_size / len(true_values),d)
+    return np.round(n_false / len(true_values), d), np.round(error_size / len(true_values), d)
 
 
 def round_dt(dt, minutes=15, up=False):
@@ -456,16 +456,22 @@ def round_dt(dt, minutes=15, up=False):
 
 
 def load_data(filename, interval_smoothing_length=15, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f', digits_to_remove=1,
-              filepath_averages='data/co2_time_average.csv', replace=False):
+              filepath_averages='data/co2_time_average.csv', replace=1, no_points=None):
     """
     Given the filename of a csv file with three columns, one with
     device id's, one with co2 measurements and one with time of
     measurement, return a list containing the measurements from
     each device where the index in the list corresponds to the zone
     number it is from.
-    :param filename:
-    :param interval_smoothing_length:
-    :return:
+    :param filename:                    name of datafile
+    :param filepath_averages:           file with replacement averages
+    :param interval_smoothing_length:   time in minutes of the interval between measurements
+    :param no_points:                   number of measurements of N
+    :param replace:                     whether to replace missing data points or not
+    :param digits_to_remove:            for formatting in datetime
+    :param format_time:                 for formatting in datetime
+    :param sep:                         for formatting in datetime
+    :return: device_data_list:          list of length 28 with each item being the data for each device
     """
 
     df = pd.read_csv(filename, sep=sep)
@@ -477,21 +483,25 @@ def load_data(filename, interval_smoothing_length=15, sep=',', format_time='%Y-%
 
     start_time = [datetime(year=9990, month=12, day=1) for _ in range(28)]
 
+    # Format the datetime strings, map the device ids and find the starting time if needed
     for row in df.values:
         co2 = row[co2_index]
-        time = string_to_datetime(row[time_index], digits_to_remove=digits_to_remove,f=format_time)
+        time = string_to_datetime(row[time_index], digits_to_remove=digits_to_remove, f=format_time)
         device_id = id_map[row[id_index]]
         device_data_list[device_id].append([time, co2])
         if time < start_time[device_id]:  # smaller time is earlier
             start_time[device_id] = time
 
-    zone_averages = pd.read_csv(filepath_averages).values
+    try:
+        zone_averages = pd.read_csv(filepath_averages).values
+    except FileNotFoundError:
+        # 600 is a decent estimate
+        zone_averages = np.ones((28, 96)) * 600
 
     for i, device in enumerate(device_data_list):
-
         # To start we want all measurements up to 15 minutes after the rounded first time
         start_time[i] = round_dt(start_time[i], minutes=interval_smoothing_length, up=False) \
-                             + timedelta(minutes=interval_smoothing_length)
+                        + timedelta(minutes=interval_smoothing_length)
         data = np.array(device_data_list[i])
 
         # Skip sensors with less than 2 measurements, because with this no change can be detected
@@ -504,27 +514,34 @@ def load_data(filename, interval_smoothing_length=15, sep=',', format_time='%Y-%
         # initialise variables
         new_data, index = [], 0
 
-        while index < len(data):
-
+        # Keep looping until either there
+        while index < len(data) or (no_points is not None and len(new_data) < no_points):
             temp = []
-            # print(f'The index is now: {index}, relevant time is: {start_time[i]}')
-            # append all data points created before relevant time to temp
-            while data[index][time_index] < start_time[i] and index < len(data) - 1:
-                temp.append(data[index])
-                index += 1
+            # ensure that if index is exceeds data length it does not crash, simply skips trying
+            # to use data from the data
+            if index < len(data):
+                # append all data points created before relevant time to temp
+                while data[index][time_index] < start_time[i]:
+                    temp.append(data[index])
+                    index += 1
+                    if index == len(data):
+                        break
 
             # Check if there was any data
             if temp:
                 new_data.append([start_time[i], exponential_moving_average(temp, tau=interval_smoothing_length)])
             else:  # Time and None if nothing recorded
                 emp = None
+                print(f'Time {start_time[i]} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
                     column = int(start_time[i].hour * 4 + start_time[i].minute / interval_smoothing_length)
-                    emp = zone_averages[i, column]
+                    emp = zone_averages[i, column]*(1-replace) + replace*new_data[-1][1] \
+                        if new_data[-1] else zone_averages[i, column][1]
                 new_data.append([start_time[i], emp])
             # Increment relevant time
             start_time[i] = start_time[i] + timedelta(minutes=interval_smoothing_length)
+
         device_data_list[i] = new_data
 
     return device_data_list
@@ -536,13 +553,15 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
     Q, m and CO2 concentration outdoors
-    :param device_data_list:
-    :param N:
-    :param V:
-    :param dt: 
+
+    :param device_data_list:    list of data from each zone, 0'th element is empty
+    :param N:                   list of occupancy from each zone, assumes same order as device data
+    :param V:                   list of volumes for each zone
+    :param dt:
     :param bounds: 
     :param verbosity:
     :param method:
+    :param plot_result:
     :return:
     """
     if bounds is None:
@@ -558,31 +577,18 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
     if V is None:
         V = np.ones(len(device_data_list)) * 250
 
-
-
     parameters = []
     np.random.seed(41)
     for i, device in enumerate(device_data_list):
+        if N is not None and not len(N[i]):
+            # skip every iteration where zone is not specified
+            continue
         if device:
-            c = []
-            # Do fix this
-            for el in device:
-                if el[1] is not None:
-                    c.append(el[1])
-                else:   # to be decided how to weight the previous measurement vs time average
-                    if c[-1]:
-                        c.append(c[-1])
-                    else:
-                        # calculate the average co2 concentration at a time of day and use
-                        c.append(550)
-
-            c = np.array(c, dtype=float)
+            c = np.array(device)[:, 1]
             v = V[i]
             if N is None:
-                m1 = len(c)
-                l1 = [0 for _ in range(m1)]
+                l1 = [0 for _ in range(len(c))]
                 n = np.array(l1, dtype=int)
-
             else:
                 n = N[i]
 
@@ -604,20 +610,24 @@ def optimise_occupancy(device_data_list, N=None, V=None, dt=15 * 60, bounds=None
             if plot_result:
                 ax1 = plt.subplot()
                 x_vals = np.arange(0, len(C_est) * dt / 60, dt / 60)
-                ax1.plot(x_vals, c[1:])
-                ax1.plot(x_vals, C_est)
+                ax1.plot(x_vals, c[1:], color='b')
+                ax1.plot(x_vals, C_est, color='c')
                 plt.ylabel('CO2 concentration (ppm)')
                 plt.xlabel('Time (min)')
 
                 # x_vals = np.arange(0, len(N_est))
                 ax2 = ax1.twinx()
-                ax2.plot(x_vals, n[1:], color='y')
-                ax2.scatter(x_vals, N_est, color='r', s=0.5)
+                ax2.bar(x_vals, n[1:], color='orange', alpha=0.2, width=4)
+                ax2.bar(x_vals, N_est, color='red', alpha=0.2, width=4)
 
                 ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
                 ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
+                # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
+                # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
 
-                plt.title(f'Measured CO2 level vs estimate from optimisation in zone {i}\nAvg. CO2 error: {error_c}, N error: {error_n}')
+                plt.title(
+                    f'Measured CO2 level vs estimate from optimisation in zone {i}\nat start time {device[0][0]}\nAvg'
+                    f'. CO2 error: {error_c}, N error: {error_n}')
                 plt.show()
             parameters.append(minimised.x)
         elif i != 0:
@@ -683,13 +693,30 @@ def check_missing_data(device_data_list, replace=False, return_count=False, verb
                 missing_list.append((i, j))
 
                 if replace and j > 0:
-                    if data[j-1]:   # only replace with previous as would be the case in real application
-                        temp.append((j, data[j-1]))
+                    if data[j - 1]:  # only replace with previous as would be the case in real application
+                        temp.append((j, data[j - 1]))
                         if verbose:
                             print(f'Data from zone {i}, at index {j} was replaced with the previous data point')
                         no_replaced += 1
 
-        for j, dat in temp:     # update data with the replacement
+        for j, dat in temp:  # update data with the replacement
             data[j] = dat
-    print(f'There were {no_missing} missing points and {no_replaced} were replaced. Ratio: {no_replaced/no_missing}')
+    print(
+        f'There were {no_missing} missing points and {no_replaced} were replaced. Ratio: {no_replaced / no_missing if no_missing else no_missing}')
     return missing_list
+
+
+def load_occupancy(filename):
+    df_N = pd.read_csv(filename, sep=';')
+
+    zones = [name for name in df_N.columns[1:-1]]
+
+    N = []
+    for i in range(28):
+        i = 'Z' + str(i)
+        if i in zones:
+            N.append(df_N[str(i)].values)
+        else:
+            N.append([])
+
+    return N
