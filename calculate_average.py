@@ -1,4 +1,4 @@
-from Functions import load_data, string_to_datetime
+from Functions import load_data, str_to_dt
 import pandas as pd
 import numpy as np
 import time
