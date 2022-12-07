@@ -457,7 +457,7 @@ def round_dt(dt, minutes=15, up=False):
 
 
 def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f', digits_to_remove=1,
-              filepath_averages='data/co2_time_average.csv', replace=1, no_points=None):
+              filepath_averages='data/co2_time_average.csv', replace=1, no_points=None, smoothing_type='exponential'):
     """
     Given the filename of a csv file with three columns, one with
     device id's, one with co2 measurements and one with time of
@@ -474,6 +474,7 @@ def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=
     :param digits_to_remove:            for formatting in datetime
     :param format_time:                 for formatting in datetime
     :param sep:                         for formatting in datetime
+    :param smoothing_type:              for time steps with multiple measurements in between, options are exponential or Kalman
     :return: device_data_list:          list of length 28 with each item being the data for each device
     """
 
@@ -528,13 +529,17 @@ def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=
 
             # Check if there was any data
             if temp:
-                new_data.append([temp_time, exponential_moving_average(temp, tau=interval_smoothing_length)])
-            else:  # Time and None if nothing recorded
+                if smoothing_type[0].lower() == 'e':
+                    co2_smoothed = exponential_moving_average(temp, tau=interval_smoothing_length)
+                elif smoothing_type[0].lower() == 'k':
+                    co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
+
+                new_data.append([temp_time, co2_smoothed])
+            else:  # Time and None if nothing recorded unless it is replaced by the average
                 emp = None
                 print(f'Time {temp_time} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
-                    print(zone_averages)
                     column = int(temp_time.hour * 4 + temp_time.minute / interval_smoothing_length)
                     emp = zone_averages[i, column]*(1-replace) + replace*new_data[-1][1] \
                         if len(new_data) > 0 else zone_averages[i, column]
@@ -557,11 +562,12 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
     :param device_data_list:    list of data from each zone, 0'th element is empty
     :param N:                   list of occupancy from each zone, assumes same order as device data
     :param V:                   list of volumes for each zone
-    :param dt:
-    :param bounds: 
-    :param verbosity:
-    :param method:
-    :param plot_result:
+    :param dt:                  float, time step
+    :param bounds:              tuple of tuple of bounds for the parameters
+    :param verbosity:           to print or not to print
+    :param method:              optimisation method for scipy's minimise
+    :param plot_result:         to show plots of the result or not
+    :param filename_parameters: string of filename to store parameters in
     :return:
     """
     if bounds is None:
@@ -682,7 +688,7 @@ def load_occupancy(filename):
     """
     df_N = pd.read_csv(filename, sep=',')
     f = '%Y.%m.%d.%H.%M.%S'
-    print(df_N.values[0, 1])
+    # print(df_N.values[0, 1])
     start_time, end_time = str_to_dt(df_N.values[0, 1], digits_to_remove=0, f=f), str_to_dt(df_N.values[-1, 1], digits_to_remove=0, f=f)
     zones = [name for name in df_N.columns[1:-1]]
 
