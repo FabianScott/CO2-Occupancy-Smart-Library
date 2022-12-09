@@ -11,7 +11,7 @@ name_param = 'parameters/testing.csv'
 dt = 15  # in minutes
 V = np.ones(28) * 300   # Has little impact
 q_min, q_max = (0.01, 5)
-m_min, m_max = (10, 20)
+m_min, m_max = (1/360000, 5)
 c_min, c_max = (300, 500)
 bounds = ((q_min, q_max), (m_min, m_max), (c_min, c_max))
 

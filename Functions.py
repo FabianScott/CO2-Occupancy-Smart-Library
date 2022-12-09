@@ -773,3 +773,14 @@ def check_missing_data(device_data_list, replace=False, return_count=False, verb
         f'There were {no_missing} missing points and {no_replaced} were replaced. Ratio: {no_replaced / no_missing if no_missing else no_missing}')
     return missing_list
 
+
+def load_multiple_data(filenames_co2, filenames_occupancy, dt=15):
+    ddl_real = [[] for _ in range(28)]
+    N_real = [[] for _ in range(28)]
+    for i, filename_co2 in enumerate(filenames_co2):
+        N, start, end = load_occupancy(filenames_occupancy[i])
+        ddl = load_data(filename_co2, start, end, replace=True, interval_smoothing_length=dt, no_points=len(N[-1]))
+        for j, d in enumerate(ddl):
+            ddl_real[j].append(d)
+            N_real.append(N[j])
+    return ddl_real, N_real
