@@ -652,7 +652,7 @@ def plot_estimates(c, C_est, n, N_est, dt, zone_id, start_time, error_c, error_n
     :param N_est:
     :param zone_id:
     :param start_time:
-    :param dt:
+    :param dt:              time step in seconds
     :param error_c:
     :param error_n:
     :return:

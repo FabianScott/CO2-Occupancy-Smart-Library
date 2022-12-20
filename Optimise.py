@@ -6,8 +6,8 @@ dates = ['24_11', '30_11'] # , '09_12', '14_12']
 
 dt = 15  # in minutes
 V = np.ones(28) * 300  # Has little impact
-q_min, q_max = (0.01, 5)
-m_min, m_max = (1 / 360000, 5)
+q_min, q_max = (.01/3600, 5/3600)
+m_min, m_max = (7.675000000*(10**(-5)), 2*7.675000000*(10**(-5)))  # see equations in Maple
 c_min, c_max = (300, 500)
 bounds = ((q_min, q_max), (m_min, m_max), (c_min, c_max))
 
@@ -29,7 +29,7 @@ for date in dates:
                 dd_list[i] = dd_list[i] + device_data_list[i]
     # print(dd_list, '\n', N_list)
 
-    parameters = optimise_occupancy(dd_list, method='Nelder-Mead', N=N_list, V=V, plot_result=False,
+    parameters = optimise_occupancy(dd_list, method='Nelder-Mead', N=N_list, V=V, plot_result=True,
                                     verbosity=False, filename_parameters=name_param, bounds=bounds)
 
 reg = False
