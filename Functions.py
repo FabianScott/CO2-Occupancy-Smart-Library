@@ -456,7 +456,7 @@ def round_dt(dt, minutes=15, up=False):
         return datetime.min + np.floor((dt - datetime.min) / delta) * delta
 
 
-def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f', digits_to_remove=1,
+def load_data(filename, start_time, end_time, interval=15, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f', digits_to_remove=1,
               filepath_averages='data/co2_time_average.csv', replace=1, no_points=None, smoothing_type='exponential'):
     """
     Given the filename of a csv file with three columns, one with
@@ -468,7 +468,7 @@ def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=
     :param start_time:                  threshold to cut off everything before
     :param end_time:                    threshold to cut off everything after
     :param filepath_averages:           file with replacement averages
-    :param interval_smoothing_length:   time in minutes of the interval between measurements
+    :param interval:   time in minutes of the interval between measurements
     :param no_points:                   number of measurements of N
     :param replace:                     whether to replace missing data points or not
     :param digits_to_remove:            for formatting in datetime
@@ -530,7 +530,7 @@ def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=
             # Check if there was any data
             if temp:
                 if smoothing_type[0].lower() == 'e':
-                    co2_smoothed = exponential_moving_average(temp, tau=interval_smoothing_length)
+                    co2_smoothed = exponential_moving_average(temp, tau=interval)
                 elif smoothing_type[0].lower() == 'k':
                     co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
 
@@ -540,12 +540,12 @@ def load_data(filename, start_time, end_time, interval_smoothing_length=15, sep=
                 print(f'Time {temp_time} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
-                    column = int(temp_time.hour * 4 + temp_time.minute / interval_smoothing_length)
+                    column = int(temp_time.hour * 4 + temp_time.minute / interval)
                     emp = zone_averages[i, column]*(1-replace) + replace*new_data[-1][1] \
                         if len(new_data) > 0 else zone_averages[i, column]
                 new_data.append([temp_time, emp])
             # Increment relevant time
-            temp_time = temp_time + timedelta(minutes=interval_smoothing_length)
+            temp_time = temp_time + timedelta(minutes=interval)
 
         device_data_list[i] = new_data
 
@@ -588,8 +588,8 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
         if device and len(N[i]) > 0:
             zone_ids.append(i)
             c = np.array(device)[:, 1]
-            v = V[i]
-            n = N[i]
+            v = np.array(V[i])
+            n = np.array(N[i])
 
             minimised = minimize(
                 abs_distance,
@@ -779,7 +779,7 @@ def load_multiple_data(filenames_co2, filenames_occupancy, dt=15):
     N_real = [[] for _ in range(28)]
     for i, filename_co2 in enumerate(filenames_co2):
         N, start, end = load_occupancy(filenames_occupancy[i])
-        ddl = load_data(filename_co2, start, end, replace=True, interval_smoothing_length=dt, no_points=len(N[-1]))
+        ddl = load_data(filename_co2, start, end, replace=True, interval=dt, no_points=len(N[-1]))
         for j, d in enumerate(ddl):
             ddl_real[j].append(d)
             N_real.append(N[j])
