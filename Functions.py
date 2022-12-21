@@ -537,7 +537,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
                 new_data.append([temp_time, co2_smoothed])
             else:  # Time and None if nothing recorded unless it is replaced by the average
                 emp = None
-                print(f'Time {temp_time} missing from zone {i}')
+                # print(f'Time {temp_time} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
                     column = int(temp_time.hour * 4 + temp_time.minute / interval)
@@ -688,10 +688,9 @@ def load_occupancy(filename):
     """
     df_N = pd.read_csv(filename, sep=',')
     f = '%Y.%m.%d.%H.%M.%S'
-    # print(df_N.values[0, 1])
     start_time, end_time = str_to_dt(df_N.values[0, 1], digits_to_remove=0, f=f), str_to_dt(df_N.values[-1, 1], digits_to_remove=0, f=f)
     zones = [name for name in df_N.columns[1:-1]]
-
+    print(df_N.values)
     N = []
     for i in range(28):
         i = 'Z' + str(i)
