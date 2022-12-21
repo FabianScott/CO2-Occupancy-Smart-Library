@@ -582,7 +582,9 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
                   bounds[2][0] - (bounds[2][0] - bounds[2][1]) / 2, ])
 
     parameters, zone_ids = [], []
+    empty_zones = []
     np.random.seed(41)
+
     for i, device in enumerate(device_data_list):
         # skip every iteration where zone has no occupancy/co2 data
         if device and len(N[i]) > 0:
@@ -611,8 +613,8 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
 
             parameters.append(minimised.x)
         elif i != 0:
-            print(f'No data from zone {i}')
-
+            empty_zones.append(i)
+    print(f'There is no data from {empty_zones}')
     if filename_parameters is not None:
         parameters = np.array(parameters)
         zone_ids = np.array(zone_ids)
@@ -696,14 +698,13 @@ def load_occupancy(filename, sep=';'):
 
     time_start = str_to_dt(filename[-14:-4] + '.' + df_N.values[0, 0], digits_to_remove=0, f=f)
     time_end = str_to_dt(filename[-14:-4] + '.' + df_N.values[-1, 0], digits_to_remove=0, f=f)
-    zones = [name for name in df_N.columns[1:-1]]
+    zones = [name for name in df_N.columns[1:]]
 
-    print(df_N.values)
     N = []
     for i in range(28):
         i = 'Z' + str(i)
         if i in zones:
-            N.append(df_N[str(i)].values)
+            N.append(df_N[i].values)
         else:
             N.append([])
 
