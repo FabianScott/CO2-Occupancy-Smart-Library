@@ -680,16 +680,24 @@ def plot_estimates(c, C_est, n, N_est, dt, zone_id, start_time, error_c, error_n
     plt.show()
 
 
-def load_occupancy(filename):
+def load_occupancy(filename, sep=';'):
     """
-    load the occupancy and
+    Load the occupancy from a csv file created by Excel's
+    vanilla csv function which says (comma delimited) despite
+    being colon delimited.
     :param filename:
+    :param sep:
     :return:
     """
-    df_N = pd.read_csv(filename, sep=',')
-    f = '%Y.%m.%d.%H.%M.%S'
-    start_time, end_time = str_to_dt(df_N.values[0, 1], digits_to_remove=0, f=f), str_to_dt(df_N.values[-1, 1], digits_to_remove=0, f=f)
+    df_N = pd.read_csv(filename, sep=sep)
+    df_N.drop(df_N.columns[-1], axis=1, inplace=True)
+    df_N.dropna(inplace=True)
+    f = '%Y_%d_%m.%H.%M.%S'
+
+    time_start = str_to_dt(filename[-14:-4] + '.' + df_N.values[0, 0], digits_to_remove=0, f=f)
+    time_end = str_to_dt(filename[-14:-4] + '.' + df_N.values[-1, 0], digits_to_remove=0, f=f)
     zones = [name for name in df_N.columns[1:-1]]
+
     print(df_N.values)
     N = []
     for i in range(28):
@@ -699,7 +707,7 @@ def load_occupancy(filename):
         else:
             N.append([])
 
-    return N, start_time, end_time
+    return N, time_start, time_end
 
 
 def simulate_office():

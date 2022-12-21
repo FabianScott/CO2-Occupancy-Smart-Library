@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from Functions import load_data, optimise_occupancy, load_occupancy, load_and_use_parameters
 
-dates = ['24_11', '30_11', '09_12', '14_12']
+dates = ['2022_24_11', '2022_30_11', '2022_07_12', '2022_09_12', '2022_14_12']
 
 dt = 15  # in minutes
 V = np.ones(28) * 300  # Has little impact
