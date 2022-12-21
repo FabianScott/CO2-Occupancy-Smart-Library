@@ -365,8 +365,15 @@ def abs_distance(x, C, N, V, dt, verbose=True, zone=1):
     :return:
     """
 
-    C_est = calculate_co2_estimate(x, C, N, V, dt)
-    dist = sum(np.abs(C[1:] - C_est))
+    C_est = []
+
+    for c, n in zip(C, N):
+        C_est.append(calculate_co2_estimate(x, np.array(c), np.array(n), V, dt))
+
+    dist = 0
+    for c, c_est in zip(C, C_est):
+        dist += sum(np.abs(c[1:] - np.array(c_est)))
+
     if verbose:
         print(f'Zone {zone}:')
         print(
@@ -375,7 +382,7 @@ def abs_distance(x, C, N, V, dt, verbose=True, zone=1):
         print(f'Average C: {np.average(C)}')
         print(f'Average C_est: {np.average(C_est)}\n\n')
 
-    # This will return the negative log likelihood as we are minimising
+    # This will return the distance we are minimising
     return dist
 
 
@@ -422,6 +429,7 @@ def calculate_n_estimate(x, C, V, dt, d=0, rho=1.22):
     Q, m, C_out = x
     Ci = C[:-1]
     C = C[1:]
+
     N = np.array((V * (C - Ci) * rho + Q * (C - C_out) * dt) \
                  / (dt * rho * m), dtype=float)
     # At least 0 people
@@ -433,19 +441,25 @@ def error_fraction(true_values, estimated_values, d=2):
     """
     Given the true and estimated values, return the proportion of
     time steps where they do not match and the average error.
+    Uses the new format of list of periods, and therefore unpacks
+    those lists to do the calculation
     :param true_values:
     :param estimated_values:
+    :param d:                   decimals in rounding
     :return:
     """
 
-    true_values = true_values[1:]
     n_false = 0
+    n_total = 0
     error_size = 0
-    for i, el in enumerate(estimated_values):
-        n_false += not true_values[i] == el
-        error_size += abs(true_values[i] - el)
 
-    return np.round(n_false / len(true_values), d), np.round(error_size / len(true_values), d)
+    for T, E in zip(true_values, estimated_values):
+        for t, e in zip(T, E):
+            n_false += not t == e
+            error_size += abs(t - e)
+            n_total += 1
+
+    return np.round(n_false / n_total, d), np.round(error_size / n_total, d)
 
 
 def round_dt(dt, minutes=15, up=False):
@@ -559,7 +573,7 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
     vectors representing the occupancy and volumes, find the optimal
     Q, m and CO2 concentration outdoors
 
-    :param device_data_list:    list of data from each zone, 0'th element is empty
+    :param device_data_list:    list of lists of data from each zone, 0'th element is empty
     :param N:                   list of occupancy from each zone, assumes same order as device data
     :param V:                   list of volumes for each zone
     :param dt:                  float, time step
@@ -587,29 +601,32 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
 
     for i, device in enumerate(device_data_list):
         # skip every iteration where zone has no occupancy/co2 data
-        if device and len(N[i]) > 0:
+        if device[0] and len(N[i][0]) > 0:
             zone_ids.append(i)
-            c = np.array(device)[:, 1]
+            C = [[el[1] for el in period] for period in device]
+            N_zone = N[i]
             v = np.array(V[i])
-            n = np.array(N[i])
 
             minimised = minimize(
                 abs_distance,
                 x0=x,
-                args=(c, n, v, dt, verbosity, i,),
+                args=(C, N_zone, v, dt, verbosity, i,),
                 bounds=bounds,
                 method=method
             )
 
-            C_est = calculate_co2_estimate(minimised.x, c, n, v, dt)
-            N_est = calculate_n_estimate(minimised.x, c, v, dt)
-            error_c = error_fraction(c, C_est)[1]
-            error_n = error_fraction(n, N_est)
+            C_est, N_est = [], []
+            for c, n in zip(C, N_zone):
+                C_est.append(calculate_co2_estimate(minimised.x, np.array(c), np.array(n), v, dt))
+                N_est.append(calculate_n_estimate(minimised.x, np.array(c), v, dt))
+
+            error_c = error_fraction(C, C_est)[1]
+            error_n = error_fraction(N_zone, N_est)
             print(f'Zone {i}:\nAverage CO2 Error: {error_c}\n'
                   f'Occupancy error (proportion wrong, average error): {error_n}')
 
             if plot_result:
-                plot_estimates(c, C_est, n, N_est, dt, i, device[0][0], error_c, error_n)
+                plot_estimates(C, C_est, N_zone, N_est, dt, i, device[:][0][0], error_c, error_n)
 
             parameters.append(minimised.x)
         elif i != 0:
@@ -628,6 +645,7 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
 
 
 def load_and_use_parameters(filepath_parameters, device_data_list, N, V, dt):
+    # NEEDS UPDATING
     # Read the parameters for each zone, then calculate co2 and N estimates
     # based on the given data, plot in same manner as in optimise
     temp = pd.read_csv(filepath_parameters).values
@@ -644,41 +662,45 @@ def load_and_use_parameters(filepath_parameters, device_data_list, N, V, dt):
         plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c, error_n)
 
 
-def plot_estimates(c, C_est, n, N_est, dt, zone_id, start_time, error_c, error_n):
+def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_times, error_c, error_n):
     """
     Given the relevant parameters and the associated errors
     plot the results.
-    :param c:
+    :param C:
     :param C_est:
-    :param n:
+    :param N:
     :param N_est:
     :param zone_id:
-    :param start_time:
+    :param start_times:
     :param dt:              time step in seconds
     :param error_c:
     :param error_n:
     :return:
     """
-    ax1 = plt.subplot()
-    x_vals = np.arange(0, len(C_est) * dt / 60, dt / 60)
-    ax1.plot(x_vals, c[1:], color='b')
-    ax1.plot(x_vals, C_est, color='c')
-    plt.ylabel('CO2 concentration (ppm)')
-    plt.xlabel('Time (min)')
-
-    # x_vals = np.arange(0, len(N_est))
-    ax2 = ax1.twinx()
-    ax2.bar(x_vals, n[1:], color='orange', alpha=0.2, width=4)
-    ax2.bar(x_vals, N_est, color='red', alpha=0.2, width=4)
-
-    ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
-    ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
-    # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
-    # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
-    plt.subplots_adjust(top=0.8)
+    x_dim = int(np.ceil(np.sqrt(len(C_est))))
+    y_dim = int(np.ceil(len(C_est)/x_dim))
+    fig, axs = plt.subplots(x_dim, y_dim)
     plt.title(
-        f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
+        f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_times}\nAvg'
         f'. CO2 error: {error_c}, N error: {error_n}')
+    for i, temp in enumerate(axs):
+        for j, ax1 in enumerate(temp):
+            x_vals = np.arange(0, len(C_est[i+j]) * dt / 60, dt / 60)
+            ax1.plot(x_vals, C[i+j][1:], color='b')
+            ax1.plot(x_vals, C_est[i+j], color='c')
+            plt.ylabel('CO2 concentration (ppm)')
+            plt.xlabel('Time (min)')
+
+            ax2 = ax1.twinx()
+            ax2.bar(x_vals, N[i+j][1:], color='orange', alpha=0.4, width=4)
+            ax2.bar(x_vals, N_est[i+j], color='red', alpha=0.4, width=4)
+
+            # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
+            # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
+            # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
+            # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
+            plt.subplots_adjust(top=0.8)
+
     plt.show()
 
 

@@ -25,8 +25,8 @@ if holdout:
                 device_data_list = load_data(temp_name_c, start, end, replace=True, interval=dt,
                                              no_points=len(N[-1]), smoothing_type='Kalman')
                 for i in range(28):
-                    N_list[i] = N_list[i] + list(N[i])
-                    dd_list[i] = dd_list[i] + device_data_list[i]
+                    N_list[i].append(list(N[i]))
+                    dd_list[i].append(device_data_list[i])
 
         name_param = f'parameters/testing_{date}.csv'
         parameters = optimise_occupancy(dd_list, method='Nelder-Mead', N=N_list, V=V, plot_result=True,
