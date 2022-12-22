@@ -400,6 +400,8 @@ def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None, rho=1.22):
     :return:
     """
     Q, m, C_out = x
+    C = np.array(C)
+    N = np.array(N)
     if no_steps is not None:  # C is then the first CO2 value
         C_est = [C]
         for i in range(no_steps - 1):
@@ -427,11 +429,12 @@ def calculate_n_estimate(x, C, V, dt, d=0, rho=1.22):
     :return:
     """
     Q, m, C_out = x
+    C = np.array(C)
+
     Ci = C[:-1]
     C = C[1:]
 
-    N = np.array((V * (C - Ci) * rho + Q * (C - C_out) * dt) \
-                 / (dt * rho * m), dtype=float)
+    N = np.array((V * (C - Ci) * rho + Q * (C - C_out) * dt) / (dt * rho * m), dtype=float)
     # At least 0 people
     N = [n if n > 0 else 0 for n in N]
     return np.round(N, d)
@@ -470,7 +473,8 @@ def round_dt(dt, minutes=15, up=False):
         return datetime.min + np.floor((dt - datetime.min) / delta) * delta
 
 
-def load_data(filename, start_time, end_time, interval=15, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f', digits_to_remove=1,
+def load_data(filename, start_time, end_time, interval=15*60, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f',
+              digits_to_remove=1,
               filepath_averages='data/co2_time_average.csv', replace=1, no_points=None, smoothing_type='exponential'):
     """
     Given the filename of a csv file with three columns, one with
@@ -482,7 +486,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
     :param start_time:                  threshold to cut off everything before
     :param end_time:                    threshold to cut off everything after
     :param filepath_averages:           file with replacement averages
-    :param interval:   time in minutes of the interval between measurements
+    :param interval:                    time in seconds of the interval between measurements
     :param no_points:                   number of measurements of N
     :param replace:                     whether to replace missing data points or not
     :param digits_to_remove:            for formatting in datetime
@@ -491,7 +495,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
     :param smoothing_type:              for time steps with multiple measurements in between, options are exponential or Kalman
     :return: device_data_list:          list of length 28 with each item being the data for each device
     """
-
+    interval = int(interval/60)     # convert to minutes for this function
     df = pd.read_csv(filename, sep=sep)
     time_index = np.argmax(df.columns == 'telemetry.time')
     co2_index = np.argmax(df.columns == 'telemetry.co2')
@@ -515,7 +519,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
     for i, device in enumerate(device_data_list):
         # To start we want all measurements up to 15 minutes after the rounded first time
         # start_time = round_dt(start_time[i], minutes=interval_smoothing_length, up=False) \
-                        # + timedelta(minutes=interval_smoothing_length)
+        # + timedelta(minutes=interval_smoothing_length)
         data = np.array(device_data_list[i])
 
         # Skip sensors with less than 2 measurements, because with this no change can be detected
@@ -555,7 +559,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
                 if replace:
                     # Find the position in the average time array with which to sub
                     column = int(temp_time.hour * 4 + temp_time.minute / interval)
-                    emp = zone_averages[i, column]*(1-replace) + replace*new_data[-1][1] \
+                    emp = zone_averages[i, column] * (1 - replace) + replace * new_data[-1][1] \
                         if len(new_data) > 0 else zone_averages[i, column]
                 new_data.append([temp_time, emp])
             # Increment relevant time
@@ -566,7 +570,7 @@ def load_data(filename, start_time, end_time, interval=15, sep=',', format_time=
     return device_data_list
 
 
-def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosity=True, method=None,
+def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosity=False, method=None,
                        plot_result=False, filename_parameters=None):
     """
     Given data in the format from the above function and potentially
@@ -576,7 +580,7 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
     :param device_data_list:    list of lists of data from each zone, 0'th element is empty
     :param N:                   list of occupancy from each zone, assumes same order as device data
     :param V:                   list of volumes for each zone
-    :param dt:                  float, time step
+    :param dt:                  float, time step in seconds
     :param bounds:              tuple of tuple of bounds for the parameters
     :param verbosity:           to print or not to print
     :param method:              optimisation method for scipy's minimise
@@ -644,25 +648,28 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
     return parameters
 
 
-def load_and_use_parameters(filepath_parameters, device_data_list, N, V, dt):
+def load_and_use_parameters(filepath_parameters, period_index, device_data_list, N, V, dt):
     # NEEDS UPDATING
     # Read the parameters for each zone, then calculate co2 and N estimates
     # based on the given data, plot in same manner as in optimise
     temp = pd.read_csv(filepath_parameters).values
     zone_ids = np.array(temp[:, 0], dtype=int)
     parameters = temp[:, 1:]
-    for i, zone_id in enumerate(zone_ids):
-        c = np.array(device_data_list[zone_id])[:, 1]
-        n = N[zone_id]
+
+    for param, zone_id in zip(parameters, zone_ids):
+        c = np.array(device_data_list[zone_id][period_index])[:, 1]
+        n = N[zone_id][period_index]
         v = V[zone_id]
-        C_est = calculate_co2_estimate(parameters[i], c, n, v, dt)
-        N_est = calculate_n_estimate(parameters[i], c, v, dt)
+
+        C_est = calculate_co2_estimate(param, c, n, v, dt)
+        N_est = calculate_n_estimate(param, c, v, dt)
         error_c = error_fraction(c, C_est)[1]
         error_n = error_fraction(n, N_est)
+
         plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c, error_n)
 
 
-def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_times, error_c, error_n):
+def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_time, error_c, error_n):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -671,35 +678,36 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_times, error_c, error_
     :param N:
     :param N_est:
     :param zone_id:
-    :param start_times:
+    :param start_time:
     :param dt:              time step in seconds
     :param error_c:
     :param error_n:
     :return:
     """
     x_dim = int(np.ceil(np.sqrt(len(C_est))))
-    y_dim = int(np.ceil(len(C_est)/x_dim))
+    y_dim = int(np.ceil(len(C_est) / x_dim))
     fig, axs = plt.subplots(x_dim, y_dim)
     plt.title(
-        f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_times}\nAvg'
+        f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
         f'. CO2 error: {error_c}, N error: {error_n}')
-    for i, temp in enumerate(axs):
-        for j, ax1 in enumerate(temp):
-            x_vals = np.arange(0, len(C_est[i+j]) * dt / 60, dt / 60)
-            ax1.plot(x_vals, C[i+j][1:], color='b')
-            ax1.plot(x_vals, C_est[i+j], color='c')
-            plt.ylabel('CO2 concentration (ppm)')
-            plt.xlabel('Time (min)')
+    axs = np.asarray(axs)
 
-            ax2 = ax1.twinx()
-            ax2.bar(x_vals, N[i+j][1:], color='orange', alpha=0.4, width=4)
-            ax2.bar(x_vals, N_est[i+j], color='red', alpha=0.4, width=4)
+    for i, ax1 in enumerate(axs.flatten()):
+        x_vals = np.arange(0, len(C_est[i]) * dt / 60, dt / 60)
+        ax1.plot(x_vals, C[i][1:], color='b')
+        ax1.plot(x_vals, C_est[i], color='c')
+        plt.ylabel('CO2 concentration (ppm)')
+        plt.xlabel('Time (min)')
 
-            # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
-            # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
-            # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
-            # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
-            plt.subplots_adjust(top=0.8)
+        ax2 = ax1.twinx()
+        ax2.bar(x_vals, N[i][1:], color='orange', alpha=0.4, width=4)
+        ax2.bar(x_vals, N_est[i], color='red', alpha=0.4, width=4)
+
+        # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
+        # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
+        # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
+        # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
+        plt.subplots_adjust(top=0.8)
 
     plt.show()
 
@@ -731,6 +739,68 @@ def load_occupancy(filename, sep=';'):
             N.append([])
 
     return N, time_start, time_end
+
+
+def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01, 5), (0.01, 20), (300, 500)), dt=15):
+    """
+    Given a list of dates in the format yyyy_dd_mm, same as filenames
+    for data, use the hold out method on each period of data, using it
+    as a test period for the parameters optimised on the rest.
+    :param dates:
+    :param V:
+    :param plot:
+    :param filename_parameters:
+    :param bounds:
+    :param dt:
+    :return:
+    """
+
+    N_list, dd_list = [[] for _ in range(28)], [[] for _ in range(28)]
+
+    # Initially load all the data into the dd_list and N_list of lists
+    for date in dates:
+        temp_name_c = 'data/co2_' + date + '.csv'
+        temp_name_n = 'data/N_' + date + '.csv'
+
+        N, start, end = load_occupancy(temp_name_n)
+        device_data_list = load_data(temp_name_c, start, end, replace=True, interval=dt,
+                                     no_points=len(N[-1]), smoothing_type='exponential')
+        for i in range(28):
+            N_list[i].append(list(N[i]))
+            dd_list[i].append(device_data_list[i])
+
+    # Use the index in the date list to hold out each period once
+    for index, date in enumerate(dates):
+
+        temp_dd, temp_N = [], []
+        for device, occupancy in zip(dd_list, N_list):
+            temp_dd.append(device[:index] + device[index + 1:])
+            temp_N.append(occupancy[:index] + occupancy[index + 1:])
+
+        name_param = f'parameters/{filename_parameters}_{date}.csv'
+        parameters = optimise_occupancy(temp_dd, method='Nelder-Mead', N=temp_N, V=V, plot_result=False,
+                                        filename_parameters=name_param, bounds=bounds)
+
+        if plot:
+            zone_id = 0
+            param_id = 0    # lazy quick fix
+            for device, occupancy, v in zip(dd_list, N_list, V):
+                if device[0] and occupancy[0]:
+                    C = [el[1] for el in device[index]]
+                    N = occupancy[index]
+                    # print(C, N, occupancy)
+                    C_est = [calculate_co2_estimate(x=parameters[param_id], C=C, N=N, V=v, dt=dt)]
+                    N_est = [calculate_n_estimate(x=parameters[param_id], C=C, V=v, dt=dt)]
+                    error_c = error_fraction([C], C_est)[1]
+                    error_n = error_fraction([N], N_est)
+
+                    plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
+                                   error_n=error_n, error_c=error_c, start_time=device[index][0][0])
+                    param_id += 1
+
+                zone_id += 1
+
+    return dd_list, N_list
 
 
 def simulate_office():
@@ -802,15 +872,3 @@ def check_missing_data(device_data_list, replace=False, return_count=False, verb
     print(
         f'There were {no_missing} missing points and {no_replaced} were replaced. Ratio: {no_replaced / no_missing if no_missing else no_missing}')
     return missing_list
-
-
-def load_multiple_data(filenames_co2, filenames_occupancy, dt=15):
-    ddl_real = [[] for _ in range(28)]
-    N_real = [[] for _ in range(28)]
-    for i, filename_co2 in enumerate(filenames_co2):
-        N, start, end = load_occupancy(filenames_occupancy[i])
-        ddl = load_data(filename_co2, start, end, replace=True, interval=dt, no_points=len(N[-1]))
-        for j, d in enumerate(ddl):
-            ddl_real[j].append(d)
-            N_real.append(N[j])
-    return ddl_real, N_real
