@@ -669,7 +669,7 @@ def load_and_use_parameters(filepath_parameters, period_index, device_data_list,
         plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c, error_n)
 
 
-def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_time, error_c, error_n):
+def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_c=None, error_n=None):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -684,6 +684,11 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id, start_time, error_c, error_n
     :param error_n:
     :return:
     """
+    if error_c is None:
+        error_c = error_fraction(C, C_est)
+    if error_n is None:
+        error_n = error_fraction(N, N_est)
+
     x_dim = int(np.ceil(np.sqrt(len(C_est))))
     y_dim = int(np.ceil(len(C_est) / x_dim))
     fig, axs = plt.subplots(x_dim, y_dim)
@@ -734,7 +739,7 @@ def load_occupancy(filename, sep=';'):
     for i in range(28):
         i = 'Z' + str(i)
         if i in zones:
-            N.append(np.array(df_N[i].values, dtype=int))
+            N.append(list(np.array(df_N[i].values, dtype=int)))
         else:
             N.append([])
 
