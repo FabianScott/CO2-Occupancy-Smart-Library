@@ -552,7 +552,7 @@ def load_data(filename, start_time, end_time, interval=15*60, sep=',', format_ti
                 elif smoothing_type[0].lower() == 'k':
                     co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
 
-                new_data.append([temp_time, co2_smoothed])
+                new_data.append((temp_time, co2_smoothed))
             else:  # Time and None if nothing recorded unless it is replaced by the average
                 emp = None
                 # print(f'Time {temp_time} missing from zone {i}')
@@ -734,11 +734,29 @@ def load_occupancy(filename, sep=';'):
     for i in range(28):
         i = 'Z' + str(i)
         if i in zones:
-            N.append(df_N[i].values)
+            N.append(np.array(df_N[i].values, dtype=int))
         else:
             N.append([])
 
     return N, time_start, time_end
+
+
+def load_lists(dates, dt):
+
+    N_list, dd_list = [[] for _ in range(28)], [[] for _ in range(28)]
+
+    for date in dates:
+        temp_name_c = 'data/co2_' + date + '.csv'
+        temp_name_n = 'data/N_' + date + '.csv'
+
+        N, start, end = load_occupancy(temp_name_n)
+        device_data_list = load_data(temp_name_c, start, end, replace=True, interval=dt,
+                                     no_points=len(N[-1]), smoothing_type='exponential')
+        for i in range(28):
+            N_list[i].append((N[i]))
+            dd_list[i].append(device_data_list[i])
+
+    return N_list, dd_list
 
 
 def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01, 5), (0.01, 20), (300, 500)), dt=15):
@@ -755,19 +773,7 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
     :return:
     """
 
-    N_list, dd_list = [[] for _ in range(28)], [[] for _ in range(28)]
-
-    # Initially load all the data into the dd_list and N_list of lists
-    for date in dates:
-        temp_name_c = 'data/co2_' + date + '.csv'
-        temp_name_n = 'data/N_' + date + '.csv'
-
-        N, start, end = load_occupancy(temp_name_n)
-        device_data_list = load_data(temp_name_c, start, end, replace=True, interval=dt,
-                                     no_points=len(N[-1]), smoothing_type='exponential')
-        for i in range(28):
-            N_list[i].append(list(N[i]))
-            dd_list[i].append(device_data_list[i])
+    N_list, dd_list = load_lists(dates, dt)
 
     # Use the index in the date list to hold out each period once
     for index, date in enumerate(dates):
