@@ -7,6 +7,7 @@ from scipy.stats import norm
 from constants import id_map
 from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from sklearn.linear_model import LinearRegression
 
 
 def basic_weighting(Ci, Ci0, n_total, decimals=0, M=None, assume_unknown=False):
@@ -694,7 +695,7 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
     fig, axs = plt.subplots(x_dim, y_dim)
     plt.title(
         f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
-        f'. CO2 error: {error_c}, N error: {error_n}')
+        f'. CO2 error: {error_c}, N error: {error_n}\n B is true C, R is true N')
     axs = np.asarray(axs)
 
     for i, ax1 in enumerate(axs.flatten()):
@@ -812,6 +813,46 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
                 zone_id += 1
 
     return dd_list, N_list
+
+
+def linear_reg_hold_out(dates, dt=15 * 60):
+    N_list, dd_list = load_lists(dates, dt)
+
+    for index, date in enumerate(dates):
+        zone_id = 0
+        for device, occupancy in zip(dd_list, N_list):  # iterate over each zone
+            zone_id += 1
+            if len(device[0]) < 1 or len(occupancy[0]) < 1:  # skip empty zones
+                continue
+
+            counter = 0
+            C_train, N_train = [], []
+            for period_time_co2, period_N in zip(device, occupancy):  # iterate over each period in zone
+
+                period_co2 = list(np.array(period_time_co2)[:, 1])
+                if counter != index:
+                    C_train = C_train + period_co2
+                    N_train = N_train + period_N
+                counter += 1
+
+            C_test, N_test = np.array(device[index])[:, 1], occupancy[index]
+            C_test, N_test = np.array(list(C_test), dtype=float).reshape(-1, 1), np.array(list(N_test),
+                                                                                          dtype=int).reshape(-1, 1)
+
+            C_train = np.array(C_train).reshape(-1, 1)
+            N_train = np.array(N_train).reshape(-1, 1)
+
+            reg_N = LinearRegression().fit(C_train, N_train)
+            N_est = np.round(reg_N.predict(C_test), 0)
+
+            reg_co2 = LinearRegression().fit(N_train, C_train)
+            C_est = reg_co2.predict(N_test)
+
+            C_est, N_est = C_est.flatten(), N_est.flatten()
+            C_test, N_test = C_test.flatten(), N_test.flatten()
+
+            C_test, N_test = np.array([0] + [el for el in C_test]), np.array([0] + [el for el in N_test])
+            plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id)
 
 
 def simulate_office():
