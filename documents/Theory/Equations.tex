@@ -1,0 +1,148 @@
+%% Created by Maple 2022.2, Windows 11
+%% Source Worksheet: Equations.mw
+%% Generated: Tue Jan 03 16:29:39 CET 2023
+\documentclass{article}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{mathtools}
+\usepackage{maple}
+\usepackage[utf8]{inputenc}
+\usepackage[svgnames]{xcolor}
+\usepackage{amsmath}
+\usepackage{breqn}
+\usepackage{textcomp}
+\begin{document}
+\lstset{basicstyle=\ttfamily,breaklines=true,columns=flexible}
+\pagestyle{empty}
+\DefineParaStyle{Maple Bullet Item}
+\DefineParaStyle{Maple Heading 1}
+\DefineParaStyle{Maple Warning}
+\DefineParaStyle{Maple Heading 4}
+\DefineParaStyle{Maple Heading 2}
+\DefineParaStyle{Maple Heading 3}
+\DefineParaStyle{Maple Dash Item}
+\DefineParaStyle{Maple Error}
+\DefineParaStyle{Maple Title}
+\DefineParaStyle{Maple Ordered List 1}
+\DefineParaStyle{Maple Text Output}
+\DefineParaStyle{Maple Ordered List 2}
+\DefineParaStyle{Maple Ordered List 3}
+\DefineParaStyle{Maple Normal}
+\DefineParaStyle{Maple Ordered List 4}
+\DefineParaStyle{Maple Ordered List 5}
+\DefineCharStyle{Maple 2D Output}
+\DefineCharStyle{Maple 2D Input}
+\DefineCharStyle{Maple Maple Input}
+\DefineCharStyle{Maple 2D Math}
+\DefineCharStyle{Maple Hyperlink}
+\section{\textbf{Mass Balance}}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\begin{Maple Normal}
+{$ \displaystyle n_{\mathit{air}}\coloneqq \frac{Q}{\mathrm{rho}}\colon \mathit{dCt} \coloneqq (C -C_{\mathit{i1}})/(\mathit{dt}) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.1)}
+\mathit{dCt} \coloneqq \frac{C -C_{\mathit{i1}}}{\mathit{dt}}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{eq1} \coloneqq V \cdot \mathit{dCt} =-(n_{\mathit{air}}\cdot (C -c_{\mathit{out}})-m \cdot n_{\mathit{occ}});\mathit{eq2} \coloneqq \mathit{simplify} (\mathit{isolate} (\mathit{eq1} ,C)) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath*}
+\mathit{eq1} \coloneqq \frac{V \left(C -C_{\mathit{i1}}\right)}{\mathit{dt}}=-\frac{Q \left(C -c_{\mathit{out}}\right)}{\rho}+m n_{\mathit{occ}}
+\end{dmath*}
+\vspace{-\bigskipamount}
+% \mapleresult
+\begin{dmath}\label{(1.2)}
+\mathit{eq2} \coloneqq C =\frac{m n_{\mathit{occ}} \mathit{dt} \rho +V \rho  C_{\mathit{i1}}+Q \mathit{dt} c_{\mathit{out}}}{Q \mathit{dt} +V \rho}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{simplify} (\mathit{isolate} (\mathit{eq1} ,n_{\mathit{occ}})) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.3)}
+n_{\mathit{occ}}=\frac{V \left(C -C_{\mathit{i1}}\right) \rho +Q \left(C -c_{\mathit{out}}\right) \mathit{dt}}{\mathit{dt} \rho  m}
+\end{dmath}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\subsection{\textbf{2015}}
+\subsection{\textbf{Units (again) MAYBE SOLVED??}}
+\begin{Maple Normal}
+Airflow is just a measure of particles per second, this must be scaled to become mass per volume of particles per time by dividing by density which has units 
+{$ \frac{\mathit{kg}}{m^{3}}. $} This means the number of cubic metres that must be exchanged for how many kg of air. 
+\end{Maple Normal}
+\begin{Maple Normal}
+{$ \displaystyle \gamma = 1.842\colon \alpha =\frac{ 44.01}{ 6.0221408\cdot 10^{23}}{\left.\mathrm{g}\right.} $}
+\end{Maple Normal}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{restart}  $}
+\end{Maple Normal}
+\begin{Maple Normal}
+{$ \displaystyle n_{\mathit{air}}\coloneqq m_{\mathit{air}}\cdot \mathrm{alpha}{\left.\frac{\mathrm{kg}}{\mathrm{s}}\right.}\colon \mathrm{Rho}\coloneqq \esapos \mathrm{rho}\esapos {\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.}\colon \textit{co2\_dens} \coloneqq \mathrm{gamma}{\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.}\colon \mathit{dCt} \coloneqq (C {\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.}-C_{\mathit{i1}}{\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.})/(\mathit{dt} {\left.\mathrm{s}\right.}) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.2.1)}
+\mathit{dCt} \coloneqq \frac{C {\left.\frac{\mathit{kg}}{m^{3}}\right.}-C_{\mathit{i1}} {\left.\frac{\mathit{kg}}{m^{3}}\right.}}{\mathit{dt} {\left.s \right.}}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{eq1} \coloneqq V {\left.\mathrm{m}^{3}\right.}\cdot \mathit{dCt} =\frac{n_{\mathit{air}}}{\mathrm{Rho}}\cdot (-C {\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.}+c_{\mathit{out}}{\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.})+c_{\mathit{occ}}\cdot \textit{co2\_dens} {\left.\frac{\mathrm{m}^{3}}{\mathrm{s}}\right.}\cdot n_{\mathit{occ}} $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.2.2)}
+\mathit{eq1} \coloneqq \frac{V \left(C {\left.\frac{\mathit{kg}}{m^{3}}\right.}-C_{\mathit{i1}} {\left.\frac{\mathit{kg}}{m^{3}}\right.}\right)}{\mathit{dt} {\left.s \right.}} {\left.m^{3}\right.}=\frac{m_{\mathit{air}} \alpha  \left(-C {\left.\frac{\mathit{kg}}{m^{3}}\right.}+c_{\mathit{out}} {\left.\frac{\mathit{kg}}{m^{3}}\right.}\right)}{\rho  {\left.\frac{\mathit{kg}}{m^{3}}\right.}} {\left.\frac{\mathit{kg}}{s}\right.}+c_{\mathit{occ}} \gamma  n_{\mathit{occ}} {\left.\frac{m^{3}}{s}\right.} {\left.\frac{\mathit{kg}}{m^{3}}\right.}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{simplify} (\mathit{isolate} (\mathit{eq1} ,C {\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.})) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.2.3)}
+C {\left.\frac{\mathit{kg}}{m^{3}}\right.}=\frac{c_{\mathit{occ}} \gamma  n_{\mathit{occ}} \mathit{dt} \rho +\alpha  c_{\mathit{out}} \mathit{dt} m_{\mathit{air}}+C_{\mathit{i1}} V \rho}{\alpha  \mathit{dt} m_{\mathit{air}}+V \rho} {\left.\frac{\mathit{kg}}{m^{3}}\right.}
+\end{dmath}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\begin{Maple Normal}
+{$ \displaystyle \mathit{simplify} (\mathit{isolate} (\mathit{eq1} ,n_{\mathit{occ}})) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.2.4)}
+n_{\mathit{occ}}=\frac{3600000 m_{\mathit{air}} \mathit{dt} \left(C -c_{\mathit{out}}\right) {\left.\frac{\mathit{kg} s}{m^{3}}\right.}+3600000 V \left(C -C_{\mathit{i1}}\right) \rho  {\left.\frac{\mathit{kg}}{m^{3}}\right.}}{\mathit{dt} \rho  c_{\mathit{occ}}}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle n_{\mathit{occ}}\cdot c_{\mathit{occ}}{\left.\frac{\mathrm{kg}}{\mathrm{s}}\right.}+m_{\mathit{air}}{\left.\frac{\mathrm{liter}}{\mathrm{s}}\right.}\cdot (c_{\mathit{out}}{\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.}-C {\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.})=V {\left.\mathrm{m}^{3}\right.}\cdot \mathit{dCt} ;\mathit{simplify} (\mathit{isolate} (\% ,C)) $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath}\label{(1.2.5)}
+c_{\mathit{occ}} n_{\mathit{occ}} {\left.\frac{\mathit{kg}}{s}\right.}+m_{\mathit{air}} \left(-C {\left.\frac{\mathit{kg}}{m^{3}}\right.}+c_{\mathit{out}} {\left.\frac{\mathit{kg}}{m^{3}}\right.}\right) {\left.\frac{L}{s}\right.}=\frac{V \left(C {\left.\frac{\mathit{kg}}{m^{3}}\right.}-C_{\mathit{i1}} {\left.\frac{\mathit{kg}}{m^{3}}\right.}\right)}{\mathit{dt} {\left.s \right.}} {\left.m^{3}\right.}
+\end{dmath}
+\begin{Maple Normal}
+{$ \displaystyle {\left.\frac{\mathrm{L}}{\mathrm{h}}\right.};250{\left.\frac{\mathrm{ml}}{\min}\right.}\cdot  1.842{\left.\frac{\mathrm{kg}}{\mathrm{m}^{3}}\right.} $}
+\end{Maple Normal}
+% \mapleresult
+\begin{dmath*}
+\frac{1}{3600000} {\left.\frac{m^{3}}{s}\right.}
+\end{dmath*}
+\vspace{-\bigskipamount}
+% \mapleresult
+\begin{dmath}\label{(1.2.6)}
+ 7.675000000\times 10^{-6} {\left.\frac{\mathit{kg}}{s}\right.}
+\end{dmath}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\section{\textbf{Smoothing}}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\begin{Maple Normal}
+
+\end{Maple Normal}
+\end{document}

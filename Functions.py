@@ -5,7 +5,7 @@ from datetime import datetime
 from datetime import timedelta
 from scipy.stats import norm
 from constants import id_map
-from scipy.optimize import minimize
+from scipy.optimize import minimize, differential_evolution
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 
@@ -456,8 +456,11 @@ def error_fraction(true_values, estimated_values, d=2):
     n_false = 0
     n_total = 0
     error_size = 0
-
+    if len(true_values) != len(estimated_values):
+        print('Dimension mismatch between true and estimated outer lists')
     for T, E in zip(true_values, estimated_values):
+        if len(T) != len(E):
+            print(f'Dimension mismatch between true and estimated inner lists: {len(T), len(E)}')
         for t, e in zip(T, E):
             n_false += not t == e
             error_size += abs(t - e)
@@ -612,12 +615,12 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
             N_zone = N[i]
             v = np.array(V[i])
 
-            minimised = minimize(
+            minimised = differential_evolution(
                 abs_distance,
                 x0=x,
                 args=(C, N_zone, v, dt, verbosity, i,),
                 bounds=bounds,
-                method=method
+                # method=method
             )
 
             C_est, N_est = [], []
@@ -803,8 +806,8 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
                     # print(C, N, occupancy)
                     C_est = [calculate_co2_estimate(x=parameters[param_id], C=C, N=N, V=v, dt=dt)]
                     N_est = [calculate_n_estimate(x=parameters[param_id], C=C, V=v, dt=dt)]
-                    error_c = error_fraction([C], C_est)[1]
-                    error_n = error_fraction([N], N_est)
+                    error_c = error_fraction([C[1:]], C_est)[1]
+                    error_n = error_fraction([N[1:]], N_est)
 
                     plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
                                    error_n=error_n, error_c=error_c, start_time=device[index][0][0])
@@ -815,11 +818,11 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
     return dd_list, N_list
 
 
-def linear_reg_hold_out(dates, dt=15 * 60):
+def linear_reg_hold_out(dates, dt=15 * 60, method='l', plot=False):
     N_list, dd_list = load_lists(dates, dt)
-
+    E_list = [[] for _ in range(29)]
     for index, date in enumerate(dates):
-        zone_id = 0
+        zone_id = 0 # to keep track of what zone is being evaluated
         for device, occupancy in zip(dd_list, N_list):  # iterate over each zone
             zone_id += 1
             if len(device[0]) < 1 or len(occupancy[0]) < 1:  # skip empty zones
@@ -833,26 +836,47 @@ def linear_reg_hold_out(dates, dt=15 * 60):
                 if counter != index:
                     C_train = C_train + period_co2
                     N_train = N_train + period_N
+                else:
+                    start_time = device[0][0][0]
                 counter += 1
 
             C_test, N_test = np.array(device[index])[:, 1], occupancy[index]
-            C_test, N_test = np.array(list(C_test), dtype=float).reshape(-1, 1), np.array(list(N_test),
-                                                                                          dtype=int).reshape(-1, 1)
 
-            C_train = np.array(C_train).reshape(-1, 1)
-            N_train = np.array(N_train).reshape(-1, 1)
+            if method.lower()[0] == 'l':
+                C_test, N_test = np.array(list(C_test), dtype=float).reshape(-1, 1), np.array(list(N_test),
+                                                                                              dtype=int).reshape(-1, 1)
 
-            reg_N = LinearRegression().fit(C_train, N_train)
-            N_est = np.round(reg_N.predict(C_test), 0)
+                C_train = np.array(C_train).reshape(-1, 1)
+                N_train = np.array(N_train).reshape(-1, 1)
 
-            reg_co2 = LinearRegression().fit(N_train, C_train)
-            C_est = reg_co2.predict(N_test)
+                reg_N = LinearRegression().fit(C_train, N_train)
+                N_est = np.round(reg_N.predict(C_test), 0)
 
-            C_est, N_est = C_est.flatten(), N_est.flatten()
-            C_test, N_test = C_test.flatten(), N_test.flatten()
+                reg_co2 = LinearRegression().fit(N_train, C_train)
+                C_est = reg_co2.predict(N_test)
 
-            C_test, N_test = np.array([0] + [el for el in C_test]), np.array([0] + [el for el in N_test])
-            plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id)
+                C_est, N_est = C_est.flatten(), N_est.flatten()
+                C_test, N_test = C_test.flatten(), N_test.flatten()
+
+                error_n = error_fraction([N_test], [N_est])
+                error_c = error_fraction([C_test], [C_est])
+
+                C_test, N_test = np.array([0] + [el for el in C_test]), np.array([0] + [el for el in N_test])
+
+            elif method.lower()[0] == 'p':
+                N_est = N_test[:-1]
+                C_est = C_test[:-1]
+
+                error_n = error_fraction([N_test[1:]], [N_est])
+                error_c = error_fraction([C_test[1:]], [C_est])
+
+            if plot:
+                plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
+                               error_c=error_c, error_n=error_n, start_time=start_time)
+
+            E_list[zone_id].append((error_c, error_n))
+
+    return E_list
 
 
 def simulate_office():

@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from Functions import linear_reg_hold_out, hold_out, load_data, load_occupancy, load_lists, plot_estimates
+from Functions import linear_reg_hold_out, hold_out,\
+    load_data, load_occupancy, load_lists, plot_estimates
 
-dates = ['2022_24_11', '2022_30_11',  '2022_09_12', '2022_14_12']   # '2022_07_12',
+dates = ['2022_24_11', '2022_30_11', '2022_07_12',  '2022_09_12', '2022_14_12']
 
 dt = 15*60  # in seconds
 V = np.ones(28) * 300  # Has little impact
@@ -12,8 +13,7 @@ m_min, m_max = (0.01, 20)  # (7.675000000*(10**(-5)), 2*7.675000000*(10**(-5))) 
 c_min, c_max = (300, 1000)
 bounds = ((q_min, q_max), (m_min, m_max), (c_min, c_max))
 
-
-# linear_reg_hold_out(dates, dt=15*60)
+print(linear_reg_hold_out(dates, dt=15*60, method='l'))
 # hold-out method:
 dd_list, N_list = hold_out(dates, V=V, dt=dt, plot=True, filename_parameters='testing', bounds=bounds)
 
