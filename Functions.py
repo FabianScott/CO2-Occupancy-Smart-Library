@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
 
 
-def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01, 5), (0.01, 20), (300, 500)), dt=15):
+def hold_out(dates, V, m=15, plot=False, filename_parameters='testing', bounds=None, dt=15):
     """
     Given a list of dates in the format yyyy_dd_mm, same as filenames
     for data, use the hold out method on each period of data, using it
@@ -24,8 +24,11 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
     :return:
     """
 
-    N_list, dd_list = load_lists(dates, dt)
+    if bounds is None:
+        from constants import bounds
 
+    N_list, dd_list = load_lists(dates, dt)
+    adj_list = adjacent_co2(dd_list)
     # Use the index in the date list to hold out each period once
     for index, date in enumerate(dates):
 
@@ -34,27 +37,26 @@ def hold_out(dates, V, plot=False, filename_parameters='testing', bounds=((0.01,
             temp_dd.append(device[:index] + device[index + 1:])
             temp_N.append(occupancy[:index] + occupancy[index + 1:])
 
-        name_param = f'parameters/{filename_parameters}_{date}.csv'
-        parameters = optimise_occupancy(temp_dd, method='Nelder-Mead', N=temp_N, V=V, plot_result=False,
-                                        filename_parameters=name_param, bounds=bounds)
+        fname_param = f'parameters/{filename_parameters}_{date}.csv'
+        parameters = optimise_occupancy(temp_dd, N_list=temp_N, V_list=V, plot_result=False,
+                                        filename_parameters=fname_param, bounds=bounds)
 
         if plot:
             zone_id = 0
             param_id = 0  # lazy quick fix
-            for device, occupancy, v in zip(dd_list, N_list, V):
+            for device, occupancy, C_adj, v in zip(dd_list, N_list, adj_list, V):
                 if device[0] and occupancy[0]:
                     C = [el[1] for el in device[index]]
                     N = occupancy[index]
+                    c_adj = C_adj[index]
                     # print(C, N, occupancy)
-                    C_est = [calculate_co2_estimate(x=parameters[param_id], C=C, N=N, V=v, dt=dt)]
-                    N_est = [calculate_n_estimate(x=parameters[param_id], C=C, V=v, dt=dt)]
+                    C_est = [C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)]
+                    N_est = [N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt)]
                     error_c = error_fraction([C[1:]], C_est)[1]
                     error_n = error_fraction([N[1:]], N_est)
-                    print('ff')
                     plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
                                    error_n=error_n, error_c=error_c, start_time=device[index][0][0])
                     param_id += 1
-
                 zone_id += 1
 
     return dd_list, N_list
@@ -76,7 +78,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
     :return:
     """
     N_list, dd_list = load_lists(dates, dt)
-    E_list = [[] for _ in range(29)]
+    E_list = [[] for _ in range(28)]
     for index, date in enumerate(dates):
         zone_id = 0  # to keep track of what zone is being evaluated
         for device, occupancy in zip(dd_list, N_list):  # iterate over each zone
@@ -120,7 +122,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
                     plt.ylabel('Occupancy level')
                     plt.title(f'Linear regression scatter plot in zone {zone_id}\n'
                               f'Test point from period {start_time}\n'
-                              f'R^2 value (Train, Test): {round(reg_N.score(C_train, N_train),3), round(reg_N.score(C_test, N_test),3)}')
+                              f'R^2 value (Train, Test): {round(reg_N.score(C_train, N_train), 3), round(reg_N.score(C_test, N_test), 3)}')
                     plt.show()
 
                 C_est, N_est = C_est.flatten(), N_est.flatten()
@@ -178,7 +180,6 @@ def load_occupancy(filename, sep=';'):
 
 
 def load_lists(dates, dt):
-
     # The structure is:
     # Outer list corresponds to zone number and is called device
     # Each device is a list of periods
@@ -436,7 +437,7 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
     plt.show()
 
 
-def calculate_replacement_co2(dd_list, n_map=None):
+def adjacent_co2(dd_list, n_map=None):
     """
     Given the device data list find calculate the average of the
     two neighbouring zone's co2 level as measured at the time of
@@ -470,6 +471,10 @@ def calculate_replacement_co2(dd_list, n_map=None):
 
                 if co2_neighbours:
                     period_replacement.append(np.average(co2_neighbours))
+                elif device[period_index][time_index]:
+                    period_replacement.append(device[period_index][time_index][1])
+                else:
+                    print(f'')
             r_list[device_index].append(period_replacement)
 
     return r_list
@@ -503,13 +508,10 @@ def str_to_dt(t, chars_to_remove='T', digits_to_remove=1, f='%Y-%m-%d:%H:%M:%S.%
     return datetime.strptime(t, f)
 
 
-def abs_distance(x, C, N, V, dt, verbose=True, zone=1):
+def abs_distance(x, C, C_adj, N, V, m, dt, verbose=False, zone=1):
     """
-    Calculates the log log_likelihood of the current parameters, by
-    finding the pdf of the normal distribution with mean = the
-    measured CO2 level and standard deviation from the specifications.
-    Since we are calculating the log likelihood, we need to minimise.
-    Parameters being optimised are:
+    Calculates the absolute difference between the estimated CO2
+    and True CO2:
         m       CO2 per person
         C_out   CO2 concentration outdoors
         Q       Airflow rate with outdoors (and neighbouring zones, to be implemented)
@@ -523,9 +525,8 @@ def abs_distance(x, C, N, V, dt, verbose=True, zone=1):
     """
 
     C_est = []
-
-    for c, n in zip(C, N):
-        C_est.append(calculate_co2_estimate(x, np.array(c), np.array(n), V, dt))
+    for c, n, c_adj in zip(C, N, C_adj):
+        C_est.append(C_estimate(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt))
 
     dist = 0
     for c, c_est in zip(C, C_est):
@@ -569,6 +570,65 @@ def calculate_co2_estimate(x, C, N, V, dt, d=2, no_steps=None, rho=1.22):
         C_est = np.array((dt * (Q * C_out + m * N * rho) + V * Ci * rho) / (Q * dt + rho * V), dtype=np.longdouble)
 
     return np.round(C_est, decimals=d)
+
+
+def C_estimate(x, C, C_adj, N, V, dt, m, d=2, rho=1.22):
+    """
+    Calculates the estimated CO2 given parameters
+    :param x:               Q, m and C_out
+    :param C:               measured CO2 levels
+    :param N:               number of people
+    :param V:               volume of zone
+    :param dt:              time step
+    :param d:
+    :param rho:
+    :param no_steps:       to be iterated over for generation, assume same time step
+    :return:
+    """
+    Q_adj, Q_out, Q_inf, C_out = x
+    C = np.array(C)
+    N = np.array(N)
+    C_adj = np.array(C_adj)[1:]
+
+    Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
+    Q = Q_adj + Q_out + Q_inf
+    C_est = (1 - Q * dt / (rho * V)) * Ci + \
+            Q_adj * dt / (rho * V) * C_adj + \
+            Q_out * dt / (rho * V) * C_out + \
+            N * dt / V * m
+
+    return np.round(C_est, decimals=d)
+
+
+def N_estimate(x, C, C_adj, V, m, dt, d=0, rho=1.22):
+    """
+    Given all necessary parameters, calculate the estimated
+    number of occupants in a zone. Can take scalars and vector
+    as long as C is a vector of length at least 2 containing
+    previous and current CO2.
+    :param x:
+    :param C:
+    :param V:
+    :param dt:
+    :param d:
+    :param rho:
+    :return:
+    """
+    Q_adj, Q_out, Q_inf, C_out = x
+    Q = Q_adj + Q_out + Q_inf
+
+    C_adj = np.array(C_adj)[1:]
+    C = np.array(C)
+    Ci = C[:-1]
+    C = C[1:]
+    N = np.array(-((-C + (1 - Q * dt / (rho * V) * Ci +
+                          Q_adj * dt * C_adj / (rho * V) +
+                          Q_out * dt * C_out / (rho * V))) * V
+                   / (dt * m)), dtype=float)
+
+    # At least 0 people
+    N = [n if n > 0 else 0 for n in N]
+    return np.round(N, d)
 
 
 def calculate_n_estimate(x, C, V, dt, d=0, rho=1.22):
@@ -628,16 +688,16 @@ def error_fraction(true_values, estimated_values, d=2):
     return np.round(n_false / n_total, d), np.round(error_size / n_total, d)
 
 
-def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosity=False, method=None,
+def optimise_occupancy(dd_list, N_list, V_list, m=15, dt=15 * 60, bounds=None, verbosity=False,
                        plot_result=False, filename_parameters=None):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
     Q, m and CO2 concentration outdoors
 
-    :param device_data_list:    list of lists of data from each zone, 0'th element is empty
-    :param N:                   list of occupancy from each zone, assumes same order as device data
-    :param V:                   list of volumes for each zone
+    :param dd_list:             list of lists of data from each zone, 0'th element is empty
+    :param N_list:              list of occupancy from each zone, assumes same order as device data
+    :param V_list:              list of volumes for each zone
     :param dt:                  float, time step in seconds
     :param bounds:              tuple of tuple of bounds for the parameters
     :param verbosity:           to print or not to print
@@ -646,48 +706,48 @@ def optimise_occupancy(device_data_list, N, V, dt=15 * 60, bounds=None, verbosit
     :param filename_parameters: string of filename to store parameters in
     :return:
     """
+    C_adj_list = adjacent_co2(dd_list)
     if bounds is None:
-        q_min, q_max = (0.01, 0.2)
-        m_min, m_max = (10, 20)
-        c_min, c_max = (300, 450)
+        from constants import bounds
 
-        bounds = ((q_min, q_max), (m_min, m_max), (c_min, c_max))
-
-    x = np.array([bounds[0][0] - (bounds[0][0] - bounds[0][1]) / 2,
-                  bounds[1][0] - (bounds[1][0] - bounds[1][1]) / 2,
-                  bounds[2][0] - (bounds[2][0] - bounds[2][1]) / 2, ])
+    x = []
+    for bound in bounds:
+        x.append((bound[0] + bound[1]) / 2)
 
     parameters, zone_ids = [], []
     empty_zones = []
     np.random.seed(41)
 
-    for i, device in enumerate(device_data_list):
+    for i, device in enumerate(dd_list):
         # skip every iteration where zone has no occupancy/co2 data
-        if device[0] and len(N[i][0]) > 0:
+        if device[0] and len(N_list[i][0]) > 0:
             zone_ids.append(i)
+            # exctract the C's, N's and C_adj's as lists of periods
             C = [[el[1] for el in period] for period in device]
-            N_zone = N[i]
-            v = np.array(V[i])
+            N = N_list[i]
+            C_adj = C_adj_list[i]
+
+            V = np.array(V_list[i])
 
             minimised = differential_evolution(
                 abs_distance,
                 x0=x,
-                args=(C, N_zone, v, dt, verbosity, i,),
+                args=(C, C_adj, N, V, m, dt, verbosity, i,),
                 bounds=bounds,
                 # method=method
             )
 
             C_est, N_est = [], []
-            for c, n in zip(C, N_zone):
-                C_est.append(calculate_co2_estimate(minimised.x, np.array(c), np.array(n), v, dt))
-                N_est.append(calculate_n_estimate(minimised.x, np.array(c), v, dt))
+            for c, n, c_adj in zip(C, N, C_adj):
+                C_est.append(C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=V, m=m, dt=dt))
+                N_est.append(N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
             error_c = error_fraction(C, C_est)[1]
-            error_n = error_fraction(N_zone, N_est)
+            error_n = error_fraction(N, N_est)
             print(f'Zone {i}:\nAverage CO2 Error: {error_c}\n'
                   f'Occupancy error (proportion wrong, average error): {error_n}')
 
             if plot_result:
-                plot_estimates(C, C_est, N_zone, N_est, dt, i, device[:][0][0], error_c, error_n)
+                plot_estimates(C, C_est, N, N_est, dt, i, device[:][0][0], error_c, error_n)
 
             parameters.append(minimised.x)
         elif i != 0:
@@ -728,7 +788,6 @@ def level_from_estimate(N, M, treshs=(0.3, 0.7)):
     output = [0 if p == 0 else (1 if p < treshs[0] else (2 if p < treshs[1] else 3)) for p in percentage]
 
     return output
-
 
 
 # %% Redundant stuff
@@ -1021,4 +1080,3 @@ def mass_balance(C, Q, V, n_total, current_time=[], n_map=None, C_out=420, alpha
         M.flatten()
         N_estimated = N_estimated * M / np.average(M)
     return N_estimated.round(decimals)
-
