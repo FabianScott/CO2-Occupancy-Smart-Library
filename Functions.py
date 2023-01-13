@@ -82,7 +82,6 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
     for index, date in enumerate(dates):
         zone_id = 0  # to keep track of what zone is being evaluated
         for device, occupancy in zip(dd_list, N_list):  # iterate over each zone
-            zone_id += 1
             if len(device[0]) < 1 or len(occupancy[0]) < 1:  # skip empty zones
                 continue
 
@@ -143,8 +142,9 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
             if plot:
                 plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
                                error_c=error_c, error_n=error_n, start_time=start_time)
-
+            print(zone_id)
             E_list[zone_id].append((error_c, error_n))
+            zone_id += 1
 
     return E_list
 
