@@ -473,8 +473,6 @@ def adjacent_co2(dd_list, n_map=None):
                     period_replacement.append(np.average(co2_neighbours))
                 elif device[period_index][time_index]:
                     period_replacement.append(device[period_index][time_index][1])
-                else:
-                    print(f'')
             r_list[device_index].append(period_replacement)
 
     return r_list
@@ -577,12 +575,13 @@ def C_estimate(x, C, C_adj, N, V, dt, m, d=2, rho=1.22):
     Calculates the estimated CO2 given parameters
     :param x:               Q, m and C_out
     :param C:               measured CO2 levels
+    :param C_adj:
     :param N:               number of people
     :param V:               volume of zone
+    :param m:
     :param dt:              time step
     :param d:
     :param rho:
-    :param no_steps:       to be iterated over for generation, assume same time step
     :return:
     """
     Q_adj, Q_out, Q_inf, C_out = x
@@ -608,7 +607,9 @@ def N_estimate(x, C, C_adj, V, m, dt, d=0, rho=1.22):
     previous and current CO2.
     :param x:
     :param C:
+    :param C_adj:
     :param V:
+    :param m:
     :param dt:
     :param d:
     :param rho:
@@ -621,10 +622,9 @@ def N_estimate(x, C, C_adj, V, m, dt, d=0, rho=1.22):
     C = np.array(C)
     Ci = C[:-1]
     C = C[1:]
-    N = np.array(-((-C + (1 - Q * dt / (rho * V) * Ci +
-                          Q_adj * dt * C_adj / (rho * V) +
-                          Q_out * dt * C_out / (rho * V))) * V
-                   / (dt * m)), dtype=float)
+    N = np.array(-(-C + (1 - Q * dt / (rho * V)) * Ci +
+                   Q_adj * dt * C_adj / (rho * V) +
+                   Q_out * dt * C_out / (rho * V) * V / (dt * m)), dtype=float)
 
     # At least 0 people
     N = [n if n > 0 else 0 for n in N]
