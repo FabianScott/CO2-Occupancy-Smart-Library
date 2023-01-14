@@ -591,9 +591,9 @@ def C_estimate(x, C, C_adj, N, V, dt, m, d=2, rho=1.22):
 
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
     Q = Q_adj + Q_out + Q_inf
-    C_est = (1 - Q * dt / (rho * V)) * Ci + \
-            Q_adj * dt / (rho * V) * C_adj + \
-            Q_out * dt / (rho * V) * C_out + \
+    C_est = (1 - Q * dt) * Ci + \
+            Q_adj * dt * C_adj + \
+            Q_out * dt * C_out + \
             N * dt / V * m
 
     return np.round(C_est, decimals=d)
@@ -622,9 +622,9 @@ def N_estimate(x, C, C_adj, V, m, dt, d=0, rho=1.22):
     C = np.array(C)
     Ci = C[:-1]
     C = C[1:]
-    N = np.array(-(-C + (1 - Q * dt / (rho * V)) * Ci +
-                   Q_adj * dt * C_adj / (rho * V) +
-                   Q_out * dt * C_out / (rho * V) * V / (dt * m)), dtype=float)
+    N = np.array(V * (C - (1 - Q * dt) * Ci -
+                   Q_adj * dt * C_adj -
+                   Q_out * dt * C_out) / (dt * m), dtype=float)
 
     # At least 0 people
     N = [n if n > 0 else 0 for n in N]
