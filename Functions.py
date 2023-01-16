@@ -584,17 +584,19 @@ def C_estimate(x, C, C_adj, N, V, dt, m, d=2, rho=1.22):
     :param rho:
     :return:
     """
-    Q_adj, Q_out, Q_inf, C_out = x
+    Q_adj, Q_out, C_out, m = x
+    Q = Q_adj + Q_out
+
     C = np.array(C)
     N = np.array(N)
     C_adj = np.array(C_adj)[1:]
 
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
-    Q = Q_adj + Q_out + Q_inf
+    Q = Q_adj + Q_out
     C_est = (1 - Q * dt) * Ci + \
             Q_adj * dt * C_adj + \
             Q_out * dt * C_out + \
-            N * dt / V * m
+            N * dt * m / V
 
     return np.round(C_est, decimals=d)
 
@@ -615,8 +617,8 @@ def N_estimate(x, C, C_adj, V, m, dt, d=0, rho=1.22):
     :param rho:
     :return:
     """
-    Q_adj, Q_out, Q_inf, C_out = x
-    Q = Q_adj + Q_out + Q_inf
+    Q_adj, Q_out, C_out, m = x
+    Q = Q_adj + Q_out
 
     C_adj = np.array(C_adj)[1:]
     C = np.array(C)
