@@ -514,7 +514,7 @@ def str_to_dt(t, chars_to_remove='T', digits_to_remove=1, f='%Y-%m-%d:%H:%M:%S.%
     return datetime.strptime(t, f)
 
 
-def abs_distance(x, C, C_adj, N, V, m, dt, verbose=False, zone=1):
+def abs_distance(x, C, C_adj, N, V, m, dt, zone=1):
     """
     Calculates the absolute difference between the estimated CO2
     and True CO2:
@@ -538,19 +538,11 @@ def abs_distance(x, C, C_adj, N, V, m, dt, verbose=False, zone=1):
     for c, c_est in zip(C, C_est):
         dist += sum(np.abs(c[1:] - np.array(c_est)))
 
-    if verbose:
-        print(f'Zone {zone}:')
-        print(
-            f'Average absolute difference: {np.average(np.abs(C_est - C[1:]))}')  # compare to C[1:] as there is no first estimate
-        print(f'Parameters: {x}')
-        print(f'Average C: {np.average(C)}')
-        print(f'Average C_est: {np.average(C_est)}\n\n')
-
     # This will return the distance we are minimising
     return dist
 
 
-def C_estimate(x, C, C_adj, N, V, dt, m=15, d=2, rho=1.22):
+def C_estimate(x, C, C_adj, N, V, dt=15*60, m=15, d=2, rho=1.22):
     """
     Calculates the estimated CO2 given parameters
     :param x:               Q, m and C_out
@@ -576,11 +568,11 @@ def C_estimate(x, C, C_adj, N, V, dt, m=15, d=2, rho=1.22):
             Q_adj * dt * C_adj + \
             Q_out * dt * C_out + \
             N * dt * m / V
-
+    C_est = np.array(C_est, dtype=float)
     return np.round(C_est, decimals=d)
 
 
-def N_estimate(x, C, C_adj, V, dt, m, d=0, rho=1.22):
+def N_estimate(x, C, C_adj, V, dt=15*60, m=15, d=0, rho=1.22):
     """
     Given all necessary parameters, calculate the estimated
     number of occupants in a zone. Can take scalars and vector
@@ -643,7 +635,7 @@ def error_fraction(true_values, estimated_values, d=2):
     return np.round(n_false / n_total, d), np.round(error_size / n_total, d)
 
 
-def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=None, verbosity=False,
+def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=None,
                        plot_result=False, filename_parameters=None, n_zones=27):
     """
     Given data in the format from the above function and potentially
@@ -665,7 +657,7 @@ def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=No
     if bounds is None:
         from constants import bounds
     if V_list is None:
-        V_list = np.ones(n_zones + 1)
+        V_list = np.ones(n_zones + 1) * 150
 
     x = []
     for bound in bounds:
@@ -689,7 +681,7 @@ def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=No
             minimised = differential_evolution(
                 abs_distance,
                 x0=x,
-                args=(C, C_adj, N, V, m, dt, verbosity, i,),
+                args=(C, C_adj, N, V, m, dt, i,),
                 bounds=bounds,
                 # method=method
             )
