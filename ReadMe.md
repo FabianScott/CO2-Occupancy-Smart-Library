@@ -8,7 +8,7 @@ Library. CO2 files require:
 - Title of the file must be co2_YYYY_DD_MM.csv, prefix is a variable in code and can thus be changed 
 - In the case of multiple periods on the same day, numbering the files is possible ie. co2_YYYY_DD_MM1.csv
 For occupancy files:
-- #zones + 1 columns: first one contains timestamps (hh.mm.ss), rest are zones. 
+- n_zones + 1 columns: first one contains timestamps (hh.mm.ss), rest are zones. 
 - Title of the file must be N_YYYY_DD_MM.csv, prefix is a variable in code and can thus be changed 
 - One empty row at the bottom of the file, stems from the method of creating the file
 - Colon delimited, but this is again a parameter which can be changed

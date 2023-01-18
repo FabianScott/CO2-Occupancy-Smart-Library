@@ -8,10 +8,10 @@ from constants import id_map
 from scipy.optimize import minimize, differential_evolution
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
+from constants import V, bounds
 
 
-def hold_out(dates, V=None, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', bounds=None,
-             n_zones=27):
+def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False):
     """
     Given a list of dates in the format yyyy_dd_mm, same as filenames
     for data, use the hold out method on each period of data, using it
@@ -20,14 +20,10 @@ def hold_out(dates, V=None, m=15, dt=15 * 60, plot=False, use_adjacent=True, fil
     :param V:
     :param plot:
     :param filename_parameters:
-    :param bounds:
     :param dt:
     :return:
     """
-    if V is None:
-        V = np.ones(n_zones + 1) * 150
-    if bounds is None:
-        from constants import bounds
+    from constants import bounds, V
 
     N_list, dd_list = load_lists(dates, dt)
     adj_list = adjacent_co2(dd_list, use_adjacent=use_adjacent)
@@ -40,9 +36,13 @@ def hold_out(dates, V=None, m=15, dt=15 * 60, plot=False, use_adjacent=True, fil
             temp_N.append(occupancy[:index] + occupancy[index + 1:])
 
         filepath_parameters = f'parameters/{filename_parameters}_{date}.csv'
-        parameters = optimise_occupancy(temp_dd, N_list=temp_N, V_list=V, plot_result=False,
+        parameters = optimise_occupancy(temp_dd, N_list=temp_N, optimise_N=optimise_N,
                                         filename_parameters=filepath_parameters, bounds=bounds)
-
+        print(f'Coefficients:\n'
+              f'{(1-dt*sum(parameters[0, :2]))} * C_(i-1) +\n'
+              f'{parameters[0, 0]*dt} * C_adj +\n'
+              f'{parameters[0, 1]*dt} * C_out({parameters[0, 2]}) +\n'
+              f'n*{dt*parameters[0, 3]}/V')
         if plot:
             zone_id = 0
             param_id = 0  # lazy quick fix
@@ -156,7 +156,7 @@ def load_occupancy(filename, n_zones=27, sep=';'):
     """
     Load the occupancy from a csv file created by Excel's
     vanilla csv function which says (comma delimited) despite
-    being colon delimited.
+    being colon delimited.y
     :param filename:
     :param sep:
     :return:
@@ -202,7 +202,7 @@ def load_lists(dates, dt=15 * 60, filepath_and_prefix_co2='data/co2_', filepath_
     return N_list, dd_list
 
 
-def load_and_use_parameters(filepath_parameters, period_index, device_data_list, N, V, dt):
+def load_and_use_parameters(filepath_parameters, period_index, device_data_list, N, dt):
     # NEEDS UPDATING
     # Read the parameters for each zone, then calculate co2 and N estimates
     # based on the given data, plot in same manner as in optimise
@@ -514,7 +514,7 @@ def str_to_dt(t, chars_to_remove='T', digits_to_remove=1, f='%Y-%m-%d:%H:%M:%S.%
     return datetime.strptime(t, f)
 
 
-def abs_distance(x, C, C_adj, N, V, m, dt, zone=1):
+def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
     """
     Calculates the absolute difference between the estimated CO2
     and True CO2:
@@ -526,17 +526,22 @@ def abs_distance(x, C, C_adj, N, V, m, dt, zone=1):
     :param N:               number of people
     :param V:               volume of zone
     :param dt:              time step
-    :param verbose:         to print or not to print
+    :param optimise_N:
     :return:
     """
 
-    C_est = []
+    C_est, N_est = [], []
     for c, n, c_adj in zip(C, N, C_adj):
         C_est.append(C_estimate(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt))
+        N_est.append(N_estimate(x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
 
     dist = 0
-    for c, c_est in zip(C, C_est):
-        dist += sum(np.abs(c[1:] - np.array(c_est)))
+    if optimise_N:
+        for n, n_est in zip(N, N_est):
+            dist += sum((n[1:] - np.array(n_est))**2)
+    else:
+        for c, c_est in zip(C, C_est):
+            dist += sum((c[1:] - np.array(c_est))**2)
 
     # This will return the distance we are minimising
     return dist
@@ -568,6 +573,8 @@ def C_estimate(x, C, C_adj, N, V, dt=15*60, m=15, d=2, rho=1.22):
             Q_adj * dt * C_adj + \
             Q_out * dt * C_out + \
             N * dt * m / V
+    # print('new')
+    # print((1 - Q * dt) * Ci, Q_adj * dt * C_adj, Q_out * dt * C_out, N * dt * m / V)
     C_est = np.array(C_est, dtype=float)
     return np.round(C_est, decimals=d)
 
@@ -635,8 +642,8 @@ def error_fraction(true_values, estimated_values, d=2):
     return np.round(n_false / n_total, d), np.round(error_size / n_total, d)
 
 
-def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=None,
-                       plot_result=False, filename_parameters=None, n_zones=27):
+def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
+                       filename_parameters=None):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -644,20 +651,15 @@ def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=No
 
     :param dd_list:             list of lists of data from each zone, 0'th element is empty
     :param N_list:              list of occupancy from each zone, assumes same order as device data
-    :param V_list:              list of volumes for each zone
+    :param V:              list of volumes for each zone
     :param dt:                  float, time step in seconds
     :param bounds:              tuple of tuple of bounds for the parameters
     :param verbosity:           to print or not to print
     :param method:              optimisation method for scipy's minimise
-    :param plot_result:         to show plots of the result or not
     :param filename_parameters: string of filename to store parameters in
     :return:
     """
     C_adj_list = adjacent_co2(dd_list)
-    if bounds is None:
-        from constants import bounds
-    if V_list is None:
-        V_list = np.ones(n_zones + 1) * 150
 
     x = []
     for bound in bounds:
@@ -676,27 +678,24 @@ def optimise_occupancy(dd_list, N_list, V_list=None, m=15, dt=15 * 60, bounds=No
             N = N_list[i]
             C_adj = C_adj_list[i]
 
-            V = np.array(V_list[i])
+            v = np.array(V[i])
 
             minimised = differential_evolution(
                 abs_distance,
                 x0=x,
-                args=(C, C_adj, N, V, m, dt, i,),
+                args=(C, C_adj, N, v, m, dt, optimise_N,),
                 bounds=bounds,
                 # method=method
             )
 
             C_est, N_est = [], []
             for c, n, c_adj in zip(C, N, C_adj):
-                C_est.append(C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=V, m=m, dt=dt))
-                N_est.append(N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
+                C_est.append(C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt))
+                N_est.append(N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt))
             error_c = error_fraction(C, C_est)[1]
             error_n = error_fraction(N, N_est)
             print(f'Zone {i}:\nAverage CO2 Error: {error_c}\n'
                   f'Occupancy error (proportion wrong, average error): {error_n}')
-
-            if plot_result:
-                plot_estimates(C, C_est, N, N_est, dt, i, device[:][0][0], error_c, error_n)
 
             parameters.append(minimised.x)
         elif i != 0:
