@@ -11,7 +11,8 @@ from sklearn.linear_model import LinearRegression
 from constants import V, bounds
 
 
-def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False):
+def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
+             error_file=None):
     """
     Given a list of dates in the format yyyy_dd_mm, same as filenames
     for data, use the hold out method on each period of data, using it
@@ -26,42 +27,61 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
     from constants import bounds, V
 
     N_list, dd_list = load_lists(dates, dt)
+    # dimension 0 -> zone, dimension 1 -> period, dimension 2 -> CO2/N error, dimension 3 -> proportion/avg./list
+    E_list = [[] for _ in N_list]
     adj_list = adjacent_co2(dd_list, use_adjacent=use_adjacent)
     # Use the index in the date list to hold out each period once
-    for index, date in enumerate(dates):
+    for date_index, date in enumerate(dates):
 
         temp_dd, temp_N = [], []
         for device, occupancy in zip(dd_list, N_list):
-            temp_dd.append(device[:index] + device[index + 1:])
-            temp_N.append(occupancy[:index] + occupancy[index + 1:])
+            temp_dd.append(device[:date_index] + device[date_index + 1:])
+            temp_N.append(occupancy[:date_index] + occupancy[date_index + 1:])
 
         filepath_parameters = f'parameters/{filename_parameters}_{date}.csv'
         parameters = optimise_occupancy(temp_dd, N_list=temp_N, optimise_N=optimise_N,
                                         filename_parameters=filepath_parameters, bounds=bounds)
-        print(f'Coefficients:\n'
-              f'{(1-dt*sum(parameters[0, :2]))} * C_(i-1) +\n'
-              f'{parameters[0, 0]*dt} * C_adj +\n'
-              f'{parameters[0, 1]*dt} * C_out({parameters[0, 2]}) +\n'
-              f'n*{dt*parameters[0, 3]}/V')
+        print(f'Coefficients for CO2:\n'
+              f'{(1 - dt * sum(parameters[0, :2]))} * C_(i-1) +\n'
+              f'{parameters[0, 0] * dt} * C_adj +\n'
+              f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}) +\n'
+              f'n*{dt * parameters[0, 3]}/V')
+        print(f'Coefficients for N:\n'
+              f'({(1 - dt * sum(parameters[0, :2]))} * C_(i-1) +\n'
+              f'{parameters[0, 0] * dt} * C_adj +\n'
+              f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}))*V +\n'
+              f'/{dt * parameters[0, 3]}')
+
         if plot:
             zone_id = 0
-            param_id = 0  # lazy quick fix
+            param_id = 0  # quick fix
             for device, occupancy, C_adj, v in zip(dd_list, N_list, adj_list, V):
                 if device[0] and occupancy[0]:
-                    C = [el[1] for el in device[index]]
-                    N = occupancy[index]
-                    c_adj = C_adj[index]
+                    C = [el[1] for el in device[date_index]]
+                    N = occupancy[date_index]
+                    c_adj = C_adj[date_index]
                     # print(C, N, occupancy)
                     C_est = [C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)]
                     N_est = [N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt)]
-                    error_c = error_fraction([C[1:]], C_est)[1]
+                    error_c = error_fraction([C[1:]], C_est)
                     error_n = error_fraction([N[1:]], N_est)
                     plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
-                                   error_n=error_n, error_c=error_c, start_time=device[index][0][0])
+                                   error_n=error_n[:2], error_c=error_c[1], start_time=device[date_index][0][0])
+                    E_list[zone_id].append([error_c, error_n])
                     param_id += 1
                 zone_id += 1
 
-    return dd_list, N_list
+    if error_file is not None:
+        with open(error_file, 'w') as file:
+            for i, zone_errors in enumerate(E_list):
+                file.write(f'{i}')
+                for period in zone_errors:
+                    for errors in period:
+                        for el in errors:
+                            file.write(str(el) + ' ')
+                        file.write('\n')
+
+    return dd_list, N_list, E_list
 
 
 def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False, n_zones=27):
@@ -143,7 +163,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
 
             if plot:
                 plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
-                               error_c=error_c, error_n=error_n, start_time=start_time)
+                               error_c=error_c[:2], error_n=error_n[:2], start_time=start_time)
             print(zone_id)
             E_list[zone_id].append((error_c, error_n))
             zone_id += 1
@@ -217,10 +237,10 @@ def load_and_use_parameters(filepath_parameters, period_index, device_data_list,
 
         C_est = calculate_co2_estimate(param, c, n, v, dt)
         N_est = calculate_n_estimate(param, c, v, dt)
-        error_c = error_fraction(c, C_est)[1]
+        error_c = error_fraction(c, C_est)
         error_n = error_fraction(n, N_est)
 
-        plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c, error_n)
+        plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c[1], error_n[:2])
 
 
 def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f',
@@ -408,9 +428,9 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
     :return:
     """
     if error_c is None:
-        error_c = error_fraction(C, C_est)
+        error_c = error_fraction(C, C_est)[1]
     if error_n is None:
-        error_n = error_fraction(N, N_est)
+        error_n = error_fraction(N, N_est)[:2]
 
     x_dim = int(np.ceil(np.sqrt(len(C_est))))
     y_dim = int(np.ceil(len(C_est) / x_dim))
@@ -429,8 +449,8 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
             plt.xlabel('Time (min)')
 
             ax2 = ax1.twinx()
-            ax2.bar(x_vals, N[i][1:], color='orange', alpha=0.4, width=4)
-            ax2.bar(x_vals, N_est[i], color='red', alpha=0.4, width=4)
+            ax2.bar(x_vals, N[i][1:], color='red', alpha=0.4, width=4)
+            ax2.bar(x_vals, N_est[i], color='orange', alpha=0.4, width=4)
 
             # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
             # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
@@ -538,16 +558,16 @@ def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
     dist = 0
     if optimise_N:
         for n, n_est in zip(N, N_est):
-            dist += sum((n[1:] - np.array(n_est))**2)
+            dist += sum((n[1:] - np.array(n_est)) ** 2)
     else:
         for c, c_est in zip(C, C_est):
-            dist += sum((c[1:] - np.array(c_est))**2)
+            dist += sum((c[1:] - np.array(c_est)) ** 2)
 
     # This will return the distance we are minimising
     return dist
 
 
-def C_estimate(x, C, C_adj, N, V, dt=15*60, m=15, d=2, rho=1.22):
+def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2, rho=1.22):
     """
     Calculates the estimated CO2 given parameters
     :param x:               Q, m and C_out
@@ -579,7 +599,7 @@ def C_estimate(x, C, C_adj, N, V, dt=15*60, m=15, d=2, rho=1.22):
     return np.round(C_est, decimals=d)
 
 
-def N_estimate(x, C, C_adj, V, dt=15*60, m=15, d=0, rho=1.22):
+def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, rho=1.22):
     """
     Given all necessary parameters, calculate the estimated
     number of occupants in a zone. Can take scalars and vector
@@ -607,14 +627,15 @@ def N_estimate(x, C, C_adj, V, dt=15*60, m=15, d=0, rho=1.22):
                       Q_out * dt * C_out) / (dt * m), dtype=float)
 
     # At least 0 people
-    N = [n if n > 0 else 0 for n in N]
+    # N = [n if n > 0 else 0 for n in N]
     return np.round(N, d)
 
 
 def error_fraction(true_values, estimated_values, d=2):
     """
     Given the true and estimated values, return the proportion of
-    time steps where they do not match and the average error.
+    time steps where they do not match, the average error and finally
+    a list of the errors.
     Uses the new format of list of periods, and therefore unpacks
     those lists to do the calculation
     :param true_values:
@@ -625,7 +646,7 @@ def error_fraction(true_values, estimated_values, d=2):
 
     n_false = 0
     n_total = 0
-    error_size = 0
+    error_list = []
     if len(true_values) != len(estimated_values):
         print('Dimension mismatch between true and estimated outer lists')
     for T, E in zip(true_values, estimated_values):
@@ -636,10 +657,9 @@ def error_fraction(true_values, estimated_values, d=2):
                 T = T[1:]
         for t, e in zip(T, E):
             n_false += not t == e
-            error_size += abs(t - e)
+            error_list.append(abs(t - e))
             n_total += 1
-
-    return np.round(n_false / n_total, d), np.round(error_size / n_total, d)
+    return np.round(n_false / n_total, d), np.round(sum(error_list) / n_total, d), error_list
 
 
 def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
@@ -692,10 +712,10 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
             for c, n, c_adj in zip(C, N, C_adj):
                 C_est.append(C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt))
                 N_est.append(N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt))
-            error_c = error_fraction(C, C_est)[1]
+            error_c = error_fraction(C, C_est)
             error_n = error_fraction(N, N_est)
-            print(f'Zone {i}:\nAverage CO2 Error: {error_c}\n'
-                  f'Occupancy error (proportion wrong, average error): {error_n}')
+            print(f'Zone {i}:\nAverage CO2 Error: {error_c[1]}\n'
+                  f'Occupancy error (proportion wrong, average error): {error_n[:2]}')
 
             parameters.append(minimised.x)
         elif i != 0:
