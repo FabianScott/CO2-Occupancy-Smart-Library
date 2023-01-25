@@ -56,25 +56,26 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
               f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}))*V +\n'
               f'/{dt * parameters[0, 3]}')
         max_N = get_max_N(temp_N)
-        if plot:
-            zone_id = 0
-            param_id = 0  # quick fix
-            for device, occupancy, C_adj, v, max_n in zip(dd_list, N_list, adj_list, V, max_N):
-                if device[0] and occupancy[0]:
-                    C = [el[1] for el in device[date_index]]
-                    N = occupancy[date_index]
-                    c_adj = C_adj[date_index]
-                    # print(C, N, occupancy)
-                    C_est = [C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)]
-                    N_est = [N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_n)]
-                    error_c = error_fraction([C[1:]], C_est)
-                    error_n = error_fraction([N[1:]], N_est)
+        zone_id = 0
+        param_id = 0  # quick fix
+        for device, occupancy, C_adj, v, max_n in zip(dd_list, N_list, adj_list, V, max_N):
+            if device[0] and occupancy[0]:
+                C = [el[1] for el in device[date_index]]
+                N = occupancy[date_index]
+                c_adj = C_adj[date_index]
+                # print(C, N, occupancy)
+                C_est = [C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)]
+                N_est = [N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_n)]
+                error_c = error_fraction([C[1:]], C_est)
+                error_n = error_fraction([N[1:]], N_est)
+
+                E_list[zone_id].append([error_c[-1], error_n[-1]])  # only list of errors
+                E_summary_list[zone_id].append([error_c[:2], error_n[:2]])
+                param_id += 1
+                if plot:
                     plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
                                    error_n=error_n[:2], error_c=error_c[1], start_time=device[date_index][0][0])
-                    E_list[zone_id].append([error_c[-1], error_n[-1]])  # only list of errors
-                    E_summary_list[zone_id].append([error_c[:2], error_n[:2]])
-                    param_id += 1
-                zone_id += 1
+            zone_id += 1
 
     if summary_errors is not None:
         with open(summary_errors, 'w') as file:
@@ -169,7 +170,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
 
             if plot:
                 plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
-                               error_c=error_c[:2], error_n=error_n[:2], start_time=start_time)
+                               error_c=error_c[:2], error_n=error_n[:2], start_time=start_time, title='Lin Reg')
             E_list[zone_id].append([error_c[-1], error_n[-1]])
 
     return E_list
@@ -517,7 +518,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
 
-def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_c=None, error_n=None):
+def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_c=None, error_n=None, title=''):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -542,7 +543,7 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
     fig, axs = plt.subplots(x_dim, y_dim)
     plt.title(
         f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
-        f'. CO2 error: {error_c}, N error: {error_n}\n B is true C, R is true N'
+        f'. CO2 error: {error_c}, N error: {error_n}\n Blue is true C, Red is true N, {title}'
     )
     axs = np.asarray(axs)
 
