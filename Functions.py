@@ -433,44 +433,44 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
 
 
 def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/'):
-    all_co2, all_N, all_errors_co2, all_errors_N = [], [], [], []
+    all_co2, all_N, errors_co2, errors_N = [], [], [], []
     for device, device_N, device_errors in zip(dd_list, N_list, E_list):
         for period, period_N, period_errors in zip(device, device_N, device_errors):
             for co2, n, error_co2, error_N in zip(np.array(period)[:, 1], period_N, period_errors[0], period_errors[1]):
                 all_co2.append(co2)
                 all_N.append(n)
-                all_errors_co2.append(error_co2)
-                all_errors_N.append(error_N)
+                errors_co2.append(error_co2)
+                errors_N.append(error_N)
 
-    all_co2_reg, all_N_reg = [], []
+    errors_co2_reg, errors_N_reg = [], []
     for device_errors in E_list_reg:
         for period in device_errors:
             skip = True
             for error_co2, error_N in zip(period[0], period[1]):
                 if not skip:
-                    all_co2_reg.append(error_co2)
-                    all_N_reg.append(error_N)
+                    errors_co2_reg.append(error_co2)
+                    errors_N_reg.append(error_N)
                 else:
                     skip = False
 
-    plt.scatter(all_co2, all_errors_co2, marker='.')
-    cor_co2 = round(np.corrcoef(all_co2, all_errors_co2)[1, 0], 3)
+    plt.scatter(all_co2, errors_co2, marker='.')
+    cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
     plt.title(f'CO2 residual plot\nCorrelation: {cor_co2}')
     plt.ylabel('Residual')
     plt.xlabel('CO2')
     plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
     plt.show()
 
-    plt.scatter(all_N, all_errors_N, marker='.')
-    cor_N = round(np.corrcoef(all_N, all_errors_N)[1, 0], 3)
+    plt.scatter(all_N, errors_N, marker='.')
+    cor_N = round(np.corrcoef(all_N, errors_N)[1, 0], 3)
     plt.title(f'N residual plot\nCorrelation: {cor_N}')
     plt.ylabel('Residual')
     plt.xlabel('N')
     plt.savefig(filepath_plots + 'N_residual')
     plt.show()
 
-    plt.scatter(all_co2, all_errors_N, marker='.')
-    cor_N = round(np.corrcoef(all_co2, all_errors_N)[1, 0], 3)
+    plt.scatter(all_co2, errors_N, marker='.')
+    cor_N = round(np.corrcoef(all_co2, errors_N)[1, 0], 3)
     plt.title(f'CO2/N residual plot\nCorrelation: {cor_N}')
     plt.ylabel('Residual')
     plt.xlabel('N')
@@ -482,7 +482,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     plt.savefig(filepath_plots + 'qq_n_MB')
     plt.show()
 
-    stats.probplot(all_N_reg, dist="norm", plot=plt)
+    stats.probplot(errors_N_reg, dist="norm", plot=plt)
     plt.title('Q-Q plot N Linear Regression')
     plt.savefig(filepath_plots + 'qq_n_lr')
     plt.show()
@@ -492,29 +492,29 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     plt.savefig(filepath_plots + 'qq_co2_MB')
     plt.show()
 
-    stats.probplot(all_co2_reg, dist="norm", plot=plt)
+    stats.probplot(errors_co2_reg, dist="norm", plot=plt)
     plt.title('Q-Q plot CO2 Linear Regression')
     plt.savefig(filepath_plots + 'qq_co2_lr')
     plt.show()
 
     print('For N:')
     print('Summary for mass balance errors:')
-    temp = pd.Series(all_N)
+    temp = pd.Series(errors_N)
     print(temp.describe())
     print('Summary for linear regression errors:')
-    temp = pd.Series(all_N_reg)
+    temp = pd.Series(errors_N_reg)
     print(temp.describe())
-    wilcox = wilcoxon(all_N, all_N_reg)
+    wilcox = wilcoxon(all_N, errors_N_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
     print('For co2:')
     print('Summary for mass balance errors:')
-    temp = pd.Series(all_co2)
+    temp = pd.Series(errors_co2)
     print(temp.describe())
     print('Summary for linear regression errors:')
-    temp = pd.Series(all_co2_reg)
+    temp = pd.Series(errors_co2_reg)
     print(temp.describe())
-    wilcox = wilcoxon(all_co2, all_co2_reg)
+    wilcox = wilcoxon(all_co2, errors_co2_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
 
@@ -690,7 +690,7 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
     Q_adj, Q_out, C_out, m = x
     Q = Q_adj + Q_out
 
-    C = np.array(C)
+    C = np.array(C) / 1_000_000     # ppm
     N = np.array(N)
     C_adj = np.array(C_adj)[1:]
 
@@ -724,8 +724,8 @@ def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, max_n=50):
     Q_adj, Q_out, C_out, m = x
     Q = Q_adj + Q_out
 
-    C_adj = np.array(C_adj)[1:]
-    C = np.array(C)
+    C_adj = np.array(C_adj)[1:] / 1_000_000
+    C = np.array(C) / 1_000_000     # ppm
     Ci = C[:-1]
     C = C[1:]
     N = np.array(V * (C - (1 - Q * dt) * Ci -
