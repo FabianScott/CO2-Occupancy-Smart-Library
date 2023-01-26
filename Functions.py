@@ -52,9 +52,9 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
               f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}) +\n'
               f'n*{dt * parameters[0, 3]}/V')
         print(f'Coefficients for N:\n'
-              f'({(1 - dt * sum(parameters[0, :2]))} * C_(i-1) +\n'
-              f'{parameters[0, 0] * dt} * C_adj +\n'
-              f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}))*V +\n'
+              f'(C - {(1 - dt * sum(parameters[0, :2]))} * C_(i-1) -\n'
+              f'{parameters[0, 0] * dt} * C_adj -\n'
+              f'{parameters[0, 1] * dt} * C_out({parameters[0, 2]}))*V\n'
               f'/{dt * parameters[0, 3]}')
         max_N = get_max_N(temp_N)
         zone_id = 0
@@ -70,7 +70,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                 error_c = error_fraction([C[1:]], C_est)
                 error_n = error_fraction([N[1:]], N_est)
 
-                E_list[zone_id].append([error_c[-1], error_n[-1]])  # only list of errors
+                E_list[zone_id].append([error_c[2], error_n[2]])  # only list of errors
                 E_summary_list[zone_id].append([error_c[:2], error_n[:2]])
                 param_id += 1
                 if plot:
@@ -172,7 +172,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
             if plot:
                 plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
                                error_c=error_c[:2], error_n=error_n[:2], start_time=start_time, title='Lin Reg')
-            E_list[zone_id].append([error_c[-1], error_n[-1]])
+            E_list[zone_id].append([error_c[2], error_n[2]])
 
     return E_list
 
@@ -435,24 +435,52 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
 
 def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/', plot=True):
     all_co2, all_N, errors_co2, errors_N = [], [], [], []
-    for device, device_N, device_errors in zip(dd_list, N_list, E_list):
-        for period, period_N, period_errors in zip(device, device_N, device_errors):
-            for co2, n, error_co2, error_N in zip(np.array(period)[:, 1], period_N, period_errors[0], period_errors[1]):
+    errors_co2_reg, errors_N_reg = [], []
+    # errors by device (EBD) dimension 0 -> device, dimension 1 -> mean,std
+    EBD_N, EBD_co2 = [[] for _ in dd_list], [[] for _ in dd_list]
+    EBD_N_reg, EBD_co2_reg = [[] for _ in dd_list], [[] for _ in dd_list]
+    detected,  detected_reg = [[] for _ in dd_list], [[] for _ in dd_list]
+
+    dev_id = 0
+    for device, device_N, device_errors, device_errors_reg in zip(dd_list, N_list, E_list, E_list_reg):
+        for period, period_N, period_errors, period_errors_reg in zip(device, device_N, device_errors, device_errors_reg):
+            for co2, n, error_co2, error_N, error_co2_reg, error_N_reg in zip(np.array(period)[:, 1], period_N, period_errors[0], period_errors[1], period_errors_reg[0][1:], period_errors_reg[1][1:]):
                 all_co2.append(co2)
                 all_N.append(n)
-                errors_co2.append(error_co2)
-                errors_N.append(error_N)
+                errors_co2.append(abs(error_co2))
+                errors_N.append(abs(error_N))
+                EBD_co2[dev_id].append(abs(error_co2))
+                EBD_N[dev_id].append(abs(error_N))
+                detected[dev_id].append(bool(n) and bool(n + error_N))
 
-    errors_co2_reg, errors_N_reg = [], []
-    for device_errors in E_list_reg:
-        for period in device_errors:
-            skip = True
-            for error_co2, error_N in zip(period[0], period[1]):
-                if not skip:
-                    errors_co2_reg.append(error_co2)
-                    errors_N_reg.append(error_N)
-                else:
-                    skip = False
+                errors_co2_reg.append(abs(error_co2_reg))
+                errors_N_reg.append(abs(error_N_reg))
+                EBD_N_reg[dev_id].append(abs(error_N_reg))
+                EBD_co2_reg[dev_id].append(abs(error_co2_reg))
+                detected_reg[dev_id].append(bool(n) and bool(n + error_N_reg))
+
+        if N_list[dev_id][0] and dd_list[dev_id][0]:
+            detected[dev_id] = sum(detected[dev_id])/len(detected[dev_id])
+            detected_reg[dev_id] = sum(detected_reg[dev_id])/len(detected_reg[dev_id])
+            print('\nFor MB:\n')
+            temp = pd.Series(EBD_N[dev_id])
+            print(f'N error summary for zone {dev_id}:\n'
+                  f'{temp.describe()}')
+            EBD_N[dev_id] = [np.mean(EBD_N[dev_id]), np.std(EBD_N[dev_id])]
+            temp = pd.Series(EBD_co2[dev_id])
+            print(f'CO2 error summary for zone {dev_id}:\n'
+                  f'{temp.describe()}')
+            EBD_co2[dev_id] = [np.mean(EBD_co2[dev_id]), np.std(EBD_co2[dev_id])]
+            print('\nFor Reg:\n')
+            temp = pd.Series(EBD_N_reg[dev_id])
+            print(f'N error summary for zone {dev_id}:\n'
+                  f'{temp.describe()}')
+            EBD_N_reg[dev_id] = [np.mean(EBD_N_reg[dev_id]), np.std(EBD_N_reg[dev_id])]
+            temp = pd.Series(EBD_co2_reg[dev_id])
+            print(f'CO2 error summary for zone {dev_id}:\n'
+                  f'{temp.describe()}')
+            EBD_co2_reg[dev_id] = [np.mean(EBD_co2_reg[dev_id]), np.std(EBD_co2_reg[dev_id])]
+        dev_id += 1
 
     if plot:
         plt.scatter(all_co2, errors_co2, marker='.')
@@ -518,6 +546,8 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     print(temp.describe())
     wilcox = wilcoxon(all_co2, errors_co2_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
+
+    return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
 
 
 def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_c=None, error_n=None, title=''):
@@ -734,8 +764,8 @@ def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, max_n=50):
                       Q_adj * dt * C_adj -
                       Q_out * dt * C_out) / (dt * m), dtype=float)
 
-    # At least 0 people, at most max_n
-    N = [min(n, max_n) if n > 0 else 0 for n in N]
+    # At least 0 people ignore max_n
+    # N = [n if n > 0 else 0 for n in N]
     return np.round(N, d)
 
 
@@ -765,9 +795,9 @@ def error_fraction(true_values, estimated_values, d=2):
                 T = T[1:]
         for t, e in zip(T, E):
             n_false += not t == e
-            error_list.append(abs(t - e))
+            error_list.append(t - e)
             n_total += 1
-    return np.round(n_false / n_total, d), np.round(sum(error_list) / n_total, d), error_list
+    return np.round(n_false / n_total, d), np.round(sum(np.abs(error_list)) / n_total, d), error_list
 
 
 def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
