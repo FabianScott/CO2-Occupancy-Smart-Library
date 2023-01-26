@@ -12,6 +12,7 @@ from sklearn.linear_model import LinearRegression
 from constants import V, bounds
 import statsmodels.api as sm
 import pylab as py
+from constants import ppm_factor
 
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
@@ -432,7 +433,7 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
     return estimates, E_est_list
 
 
-def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/'):
+def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/', plot=True):
     all_co2, all_N, errors_co2, errors_N = [], [], [], []
     for device, device_N, device_errors in zip(dd_list, N_list, E_list):
         for period, period_N, period_errors in zip(device, device_N, device_errors):
@@ -453,49 +454,50 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
                 else:
                     skip = False
 
-    plt.scatter(all_co2, errors_co2, marker='.')
-    cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
-    plt.title(f'CO2 residual plot\nCorrelation: {cor_co2}')
-    plt.ylabel('Residual')
-    plt.xlabel('CO2')
-    plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
-    plt.show()
+    if plot:
+        plt.scatter(all_co2, errors_co2, marker='.')
+        cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
+        plt.title(f'CO2 residual plot\nCorrelation: {cor_co2}')
+        plt.ylabel('Residual')
+        plt.xlabel('CO2')
+        plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
+        plt.show()
 
-    plt.scatter(all_N, errors_N, marker='.')
-    cor_N = round(np.corrcoef(all_N, errors_N)[1, 0], 3)
-    plt.title(f'N residual plot\nCorrelation: {cor_N}')
-    plt.ylabel('Residual')
-    plt.xlabel('N')
-    plt.savefig(filepath_plots + 'N_residual')
-    plt.show()
+        plt.scatter(all_N, errors_N, marker='.')
+        cor_N = round(np.corrcoef(all_N, errors_N)[1, 0], 3)
+        plt.title(f'N residual plot\nCorrelation: {cor_N}')
+        plt.ylabel('Residual')
+        plt.xlabel('N')
+        plt.savefig(filepath_plots + 'N_residual')
+        plt.show()
 
-    plt.scatter(all_co2, errors_N, marker='.')
-    cor_N = round(np.corrcoef(all_co2, errors_N)[1, 0], 3)
-    plt.title(f'CO2/N residual plot\nCorrelation: {cor_N}')
-    plt.ylabel('Residual')
-    plt.xlabel('N')
-    plt.savefig(filepath_plots + 'co2_N_residual')
-    plt.show()
+        plt.scatter(all_co2, errors_N, marker='.')
+        cor_N = round(np.corrcoef(all_co2, errors_N)[1, 0], 3)
+        plt.title(f'CO2/N residual plot\nCorrelation: {cor_N}')
+        plt.ylabel('Residual')
+        plt.xlabel('N')
+        plt.savefig(filepath_plots + 'co2_N_residual')
+        plt.show()
 
-    stats.probplot(all_N, dist="norm", plot=plt)
-    plt.title('Q-Q plot N Mass Balance')
-    plt.savefig(filepath_plots + 'qq_n_MB')
-    plt.show()
+        stats.probplot(all_N, dist="norm", plot=plt)
+        plt.title('Q-Q plot N Mass Balance')
+        plt.savefig(filepath_plots + 'qq_n_MB')
+        plt.show()
 
-    stats.probplot(errors_N_reg, dist="norm", plot=plt)
-    plt.title('Q-Q plot N Linear Regression')
-    plt.savefig(filepath_plots + 'qq_n_lr')
-    plt.show()
+        stats.probplot(errors_N_reg, dist="norm", plot=plt)
+        plt.title('Q-Q plot N Linear Regression')
+        plt.savefig(filepath_plots + 'qq_n_lr')
+        plt.show()
 
-    stats.probplot(all_co2, dist="norm", plot=plt)
-    plt.title('Q-Q plot CO2 Mass Balance')
-    plt.savefig(filepath_plots + 'qq_co2_MB')
-    plt.show()
+        stats.probplot(all_co2, dist="norm", plot=plt)
+        plt.title('Q-Q plot CO2 Mass Balance')
+        plt.savefig(filepath_plots + 'qq_co2_MB')
+        plt.show()
 
-    stats.probplot(errors_co2_reg, dist="norm", plot=plt)
-    plt.title('Q-Q plot CO2 Linear Regression')
-    plt.savefig(filepath_plots + 'qq_co2_lr')
-    plt.show()
+        stats.probplot(errors_co2_reg, dist="norm", plot=plt)
+        plt.title('Q-Q plot CO2 Linear Regression')
+        plt.savefig(filepath_plots + 'qq_co2_lr')
+        plt.show()
 
     print('For N:')
     print('Summary for mass balance errors:')
@@ -690,9 +692,9 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
     Q_adj, Q_out, C_out, m = x
     Q = Q_adj + Q_out
 
-    C = np.array(C) / 1_000_000     # ppm
     N = np.array(N)
-    C_adj = np.array(C_adj)[1:]
+    C = np.array(C) / ppm_factor     # ppm
+    C_adj = np.array(C_adj)[1:] / ppm_factor
 
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
     C_est = (1 - Q * dt) * Ci + \
@@ -701,7 +703,7 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
             N * dt * m / V
     # print('new')
     # print((1 - Q * dt) * Ci, Q_adj * dt * C_adj, Q_out * dt * C_out, N * dt * m / V)
-    C_est = np.array(C_est, dtype=float)
+    C_est = np.array(C_est, dtype=float) * ppm_factor
     return np.round(C_est, decimals=d)
 
 
@@ -724,8 +726,8 @@ def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, max_n=50):
     Q_adj, Q_out, C_out, m = x
     Q = Q_adj + Q_out
 
-    C_adj = np.array(C_adj)[1:] / 1_000_000
-    C = np.array(C) / 1_000_000     # ppm
+    C_adj = np.array(C_adj)[1:] / ppm_factor
+    C = np.array(C) / ppm_factor     # ppm
     Ci = C[:-1]
     C = C[1:]
     N = np.array(V * (C - (1 - Q * dt) * Ci -

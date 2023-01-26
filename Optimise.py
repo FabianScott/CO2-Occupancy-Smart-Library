@@ -12,8 +12,8 @@ dates = ['2022_24_11', '2022_30_11', '2022_07_12', '2022_09_12', '2022_14_12', '
 error_file = 'parameters/e.txt'
 dd_list, N_list, E_list = hold_out(dates[:2], plot=True, filename_parameters='testing', optimise_N=0,
                                    summary_errors=error_file)
-E_list_reg = simple_models_hold_out(dates[:2], dt=15 * 60, method='l', plot=True, plot_scatter=0)
+# E_list_reg = simple_models_hold_out(dates[:2], dt=15 * 60, method='l', plot=True, plot_scatter=0)
 
-residual_analysis(dd_list, N_list, E_list, E_list_reg)
+# residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=False)
 
 
