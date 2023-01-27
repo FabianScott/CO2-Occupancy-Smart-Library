@@ -14,6 +14,6 @@ dd_list, N_list, E_list = hold_out(dates, plot=True, filename_parameters='testin
                                    summary_errors=error_file)
 E_list_reg = simple_models_hold_out(dates, dt=15 * 60, method='l', plot=True, plot_scatter=0)
 
-residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=False)
+residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=True)
 
 

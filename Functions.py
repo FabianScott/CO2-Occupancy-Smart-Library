@@ -1,18 +1,13 @@
 import numpy as np
 import pandas as pd
 from copy import copy
-from datetime import datetime
-from datetime import timedelta
-from scipy import stats
-from scipy.stats import norm, wilcoxon
-from constants import id_map
-from scipy.optimize import minimize, differential_evolution
 import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+from scipy.stats import norm, wilcoxon, probplot, shapiro
+from scipy.optimize import differential_evolution
 from sklearn.linear_model import LinearRegression
-from constants import V, bounds
-import statsmodels.api as sm
-import pylab as py
-from constants import ppm_factor
+from constants import V, bounds, id_map, ppm_factor
+from statsmodels.stats.contingency_tables import mcnemar
 
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
@@ -28,7 +23,6 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
     :param dt:
     :return:
     """
-    from constants import bounds, V
 
     N_list, dd_list = load_lists(dates, dt)
     # dimension 0 -> zone, dimension 1 -> period, dimension 2 -> CO2,N error, dimension 3 -> proportion,avg.,list
@@ -439,7 +433,8 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     # errors by device (EBD) dimension 0 -> device, dimension 1 -> mean,std
     EBD_N, EBD_co2 = [[] for _ in dd_list], [[] for _ in dd_list]
     EBD_N_reg, EBD_co2_reg = [[] for _ in dd_list], [[] for _ in dd_list]
-    detected,  detected_reg = [[] for _ in dd_list], [[] for _ in dd_list]
+    detected, detected_reg = [[] for _ in dd_list], [[] for _ in dd_list]
+    all_detected, all_detected_reg = [], []
 
     dev_id = 0
     for device, device_N, device_errors, device_errors_reg in zip(dd_list, N_list, E_list, E_list_reg):
@@ -447,19 +442,24 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
             for co2, n, error_co2, error_N, error_co2_reg, error_N_reg in zip(np.array(period)[:, 1], period_N, period_errors[0], period_errors[1], period_errors_reg[0][1:], period_errors_reg[1][1:]):
                 all_co2.append(co2)
                 all_N.append(n)
-                errors_co2.append(abs(error_co2))
-                errors_N.append(abs(error_N))
+                errors_co2.append((error_co2))
+                errors_N.append((error_N))
                 EBD_co2[dev_id].append(abs(error_co2))
                 EBD_N[dev_id].append(abs(error_N))
                 detected[dev_id].append(bool(n) and bool(n + error_N))
 
-                errors_co2_reg.append(abs(error_co2_reg))
-                errors_N_reg.append(abs(error_N_reg))
+                errors_co2_reg.append((error_co2_reg))
+                errors_N_reg.append((error_N_reg))
                 EBD_N_reg[dev_id].append(abs(error_N_reg))
                 EBD_co2_reg[dev_id].append(abs(error_co2_reg))
                 detected_reg[dev_id].append(bool(n) and bool(n + error_N_reg))
 
+                all_detected.append(bool(n) and bool(n + error_N))
+                all_detected_reg.append(bool(n) and bool(n + error_N_reg))
+
         if N_list[dev_id][0] and dd_list[dev_id][0]:
+            df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
+            print(f'McNemar p-value for detecting occupancy zone {dev_id}:\n{mcnemar(df)}')
             detected[dev_id] = sum(detected[dev_id])/len(detected[dev_id])
             detected_reg[dev_id] = sum(detected_reg[dev_id])/len(detected_reg[dev_id])
             print('\nFor MB:\n')
@@ -485,7 +485,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     if plot:
         plt.scatter(all_co2, errors_co2, marker='.')
         cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
-        plt.title(f'CO2 residual plot\nCorrelation: {cor_co2}')
+        plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
         plt.ylabel('Residual')
         plt.xlabel('CO2')
         plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
@@ -493,7 +493,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
 
         plt.scatter(all_N, errors_N, marker='.')
         cor_N = round(np.corrcoef(all_N, errors_N)[1, 0], 3)
-        plt.title(f'N residual plot\nCorrelation: {cor_N}')
+        plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual')
         plt.xlabel('N')
         plt.savefig(filepath_plots + 'N_residual')
@@ -501,51 +501,82 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
 
         plt.scatter(all_co2, errors_N, marker='.')
         cor_N = round(np.corrcoef(all_co2, errors_N)[1, 0], 3)
-        plt.title(f'CO2/N residual plot\nCorrelation: {cor_N}')
+        plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
+        plt.ylabel('Residual N')
+        plt.xlabel('CO2')
+        plt.savefig(filepath_plots + 'co2_N_residual')
+        plt.show()
+
+        plt.scatter(all_co2, errors_co2_reg, marker='.')
+        cor_co2 = round(np.corrcoef(all_co2, errors_co2_reg)[1, 0], 3)
+        plt.title(f'CO2 residual plot reg\nCorrelation: {cor_co2}')
+        plt.ylabel('Residual')
+        plt.xlabel('CO2')
+        plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
+        plt.show()
+
+        plt.scatter(all_N, errors_N_reg, marker='.')
+        cor_N = round(np.corrcoef(all_N, errors_N_reg)[1, 0], 3)
+        plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
+        plt.ylabel('Residual')
+        plt.xlabel('N')
+        plt.savefig(filepath_plots + 'N_residual')
+        plt.show()
+
+        plt.scatter(all_co2, errors_N_reg, marker='.')
+        cor_N = round(np.corrcoef(all_co2, errors_N_reg)[1, 0], 3)
+        plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual')
         plt.xlabel('N')
         plt.savefig(filepath_plots + 'co2_N_residual')
         plt.show()
 
-        stats.probplot(all_N, dist="norm", plot=plt)
-        plt.title('Q-Q plot N Mass Balance')
+        probplot(errors_N, dist="norm", plot=plt)
+        shapiro_p = shapiro(errors_N).pvalue
+        plt.title(f'Q-Q plot N errors Mass Balance\nShapiro p-value: {shapiro_p}')
         plt.savefig(filepath_plots + 'qq_n_MB')
         plt.show()
 
-        stats.probplot(errors_N_reg, dist="norm", plot=plt)
-        plt.title('Q-Q plot N Linear Regression')
+        probplot(errors_N_reg, dist="norm", plot=plt)
+        shapiro_p = shapiro(errors_N_reg).pvalue
+        plt.title(f'Q-Q plot N errors Linear Regression\nShapiro p-value: {shapiro_p}')
         plt.savefig(filepath_plots + 'qq_n_lr')
         plt.show()
 
-        stats.probplot(all_co2, dist="norm", plot=plt)
-        plt.title('Q-Q plot CO2 Mass Balance')
+        probplot(errors_co2, dist="norm", plot=plt)
+        shapiro_p = shapiro(errors_co2).pvalue
+        plt.title(f'Q-Q plot CO2 errors Mass Balance\nShapiro p-value: {shapiro_p}')
         plt.savefig(filepath_plots + 'qq_co2_MB')
         plt.show()
 
-        stats.probplot(errors_co2_reg, dist="norm", plot=plt)
-        plt.title('Q-Q plot CO2 Linear Regression')
+        probplot(errors_co2_reg, dist="norm", plot=plt)
+        shapiro_p = shapiro(errors_co2_reg).pvalue
+        plt.title(f'Q-Q plot CO2 errors Linear Regression\nShapiro p-value: {shapiro_p}')
         plt.savefig(filepath_plots + 'qq_co2_lr')
         plt.show()
 
     print('For N:')
     print('Summary for mass balance errors:')
-    temp = pd.Series(errors_N)
+    temp = pd.Series(np.abs(errors_N))
     print(temp.describe())
     print('Summary for linear regression errors:')
-    temp = pd.Series(errors_N_reg)
+    temp = pd.Series(np.abs(errors_N_reg))
     print(temp.describe())
     wilcox = wilcoxon(all_N, errors_N_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
     print('For co2:')
     print('Summary for mass balance errors:')
-    temp = pd.Series(errors_co2)
+    temp = pd.Series(np.abs(errors_co2))
     print(temp.describe())
     print('Summary for linear regression errors:')
-    temp = pd.Series(errors_co2_reg)
+    temp = pd.Series(np.abs(errors_co2_reg))
     print(temp.describe())
     wilcox = wilcoxon(all_co2, errors_co2_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
+
+    df = pd.crosstab(all_detected, all_detected_reg)
+    print(f'McNemar p-value for detecting occupancy:\n{mcnemar(df)}')
 
     return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
 
