@@ -145,7 +145,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
                     plt.ylabel('Occupancy level')
                     plt.title(f'Linear regression scatter plot in zone {zone_id}\n'
                               f'Test point from period {start_time}\n'
-                              f'R^2 value (Train, Test): {round(reg_N.score(C_train, N_train), 3), round(reg_N.score(C_test, N_test), 3)}')
+                              f'Errors (Train, Test): {round(reg_N.score(C_train, N_train), 3), round(reg_N.score(C_test, N_test), 3)}')
                     plt.show()
 
                 C_est, N_est = C_est.flatten(), N_est.flatten()
@@ -483,6 +483,8 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         dev_id += 1
 
     if plot:
+        plot_estimates(all_co2, np.array(all_co2) + np.array(errors_co2), all_N, np.array(all_N) + np.array(errors_N))
+
         plt.scatter(all_co2, errors_co2, marker='.')
         cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
         plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
@@ -581,7 +583,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
 
 
-def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_c=None, error_n=None, title=''):
+def plot_estimates(C, C_est, N, N_est, dt=60*15, zone_id=None, start_time=None, error_c=None, error_n=None, title=''):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -596,39 +598,28 @@ def plot_estimates(C, C_est, N, N_est, dt, zone_id=None, start_time=None, error_
     :param error_n:
     :return:
     """
-    if error_c is None:
-        error_c = error_fraction(C, C_est)[1]
-    if error_n is None:
-        error_n = error_fraction(N, N_est)[:2]
 
-    x_dim = int(np.ceil(np.sqrt(len(C_est))))
-    y_dim = int(np.ceil(len(C_est) / x_dim))
-    fig, axs = plt.subplots(x_dim, y_dim)
+
+    fig, ax1 = plt.subplots(1, 1)
+    i = 0
+    x_vals = np.arange(0, len(C_est[i]) * dt / 60, dt / 60)
+    ax1.plot(x_vals, C[i][1:], color='b')
+    ax1.plot(x_vals, C_est[i], color='c')
+    plt.ylabel('CO2 concentration (ppm)')
+    plt.xlabel('Time (min)')
     plt.title(
         f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
         f'. CO2 error: {error_c}, N error: {error_n}\n Blue is true C, Red is true N, {title}'
     )
-    axs = np.asarray(axs)
 
-    for i, ax1 in enumerate(axs.flatten()):
-        try:
-            x_vals = np.arange(0, len(C_est[i]) * dt / 60, dt / 60)
-            ax1.plot(x_vals, C[i][1:], color='b')
-            ax1.plot(x_vals, C_est[i], color='c')
-            plt.ylabel('CO2 concentration (ppm)')
-            plt.xlabel('Time (min)')
+    ax2 = ax1.twinx()
+    ax2.bar(x_vals, N[i][1:], color='red', alpha=0.4, width=4)
+    ax2.bar(x_vals, N_est[i], color='orange', alpha=0.4, width=4)
 
-            ax2 = ax1.twinx()
-            ax2.bar(x_vals, N[i][1:], color='red', alpha=0.4, width=4)
-            ax2.bar(x_vals, N_est[i], color='orange', alpha=0.4, width=4)
-
-            # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
-            # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
-            # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
-            # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
-            plt.subplots_adjust(top=0.8)
-        except IndexError:
-            pass
+    # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
+    # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
+    # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
+    # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
 
     plt.show()
 
