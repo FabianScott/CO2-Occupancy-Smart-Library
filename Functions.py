@@ -11,7 +11,7 @@ from statsmodels.stats.contingency_tables import mcnemar
 
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
-             summary_errors=None):
+             summary_errors=None, no_steps=0):
     """
     Given a list of dates in the format yyyy_dd_mm, same as filenames
     for data, use the hold out method on each period of data, using it
@@ -25,6 +25,8 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
     """
 
     N_list, dd_list = load_lists(dates, dt)
+    # dimension 0 -> zone, dimension 1 -> (Q_adj, Q_out, C_out, m), dimension 2 -> (error_co2, error_n)
+    sensitivity_list = [[[] for _ in range(4)] for _ in dd_list] # periods simply appended in series
     # dimension 0 -> zone, dimension 1 -> period, dimension 2 -> CO2,N error, dimension 3 -> proportion,avg.,list
     E_list = [[] for _ in N_list]
     E_summary_list = [[] for _ in N_list]
@@ -60,16 +62,32 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                 c_adj = C_adj[date_index]
                 # print(C, N, occupancy)
                 C_est = C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
-                N_est = N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_n)
+                N_est = N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt)
                 error_c = error_fraction(C[1:], C_est)
                 error_n = error_fraction(N[1:], N_est)
 
                 E_list[zone_id].append([error_c[2], error_n[2]])  # only list of errors
                 E_summary_list[zone_id].append([error_c[:2], error_n[:2]])
-                param_id += 1
                 if plot:
                     plot_estimates(C=C[1:], C_est=C_est, N=N[1:], N_est=N_est, dt=dt, zone_id=zone_id,
                                    error_n=error_n[:2], error_c=error_c[1], start_time=device[date_index][0][0])
+
+                if no_steps:
+                    start = [el[0] for el in bounds]
+                    end = [el[1] for el in bounds]
+                    increments = [(el2-el1)/no_steps for el1, el2 in zip(start, end)]
+                    for sens_index in range(4):
+                        temp_params = parameters[param_id]
+                        for increment_factor in range(no_steps):
+                            temp_params[sens_index] = increment_factor * increments[sens_index] + start[sens_index]
+                            C_est = C_estimate(x=temp_params, C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
+                            N_est = N_estimate(x=temp_params, C=C, C_adj=c_adj, V=v, m=m, dt=dt)
+                            error_c = error_fraction(C[1:], C_est)
+                            error_n = error_fraction(N[1:], N_est)
+                            print(zone_id, sens_index)
+                            sensitivity_list[zone_id][sens_index].append([error_c[1], error_n[1], increment_factor])
+                param_id += 1
+
             zone_id += 1
 
     if summary_errors is not None:
@@ -82,7 +100,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                             file.write(str(el) + ' ')
                     file.write('\n')
 
-    return dd_list, N_list, E_list
+    return dd_list, N_list, E_list, sensitivity_list
 
 
 def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False, n_zones=27):
@@ -199,6 +217,31 @@ def load_occupancy(filename, n_zones=27, sep=';'):
             N.append([])
 
     return N, time_start, time_end
+
+
+def load_davide(optimise=False):
+    N, period = [], []
+    with open('data/davides_office.csv', 'r') as file:
+        file.readline()
+        for line in file.readlines():
+            line = line.split(',')
+            t = str_to_dt(line[3][:16], f='%Y-%m-%d:%H:%M')
+
+            period.append([t, int(line[6])])
+            N.append(0)
+    dd_davide = [[period]]
+    if optimise:
+        v = 3 * 2 * 3
+        dt = 10 * 60
+        parameters = optimise_occupancy(dd_davide, [[N]], dt=dt, v=v, use_adjacent=False, bounds=bounds)
+        C = [el[1] for el in period]
+        C_adj = adjacent_co2(dd_davide, use_adjacent=False)[0][0]
+        C_est = C_estimate(parameters[0], C, C_adj, N=N, dt=dt, V=v)
+        N_est = N_estimate(parameters[0], C, C_adj, V=v, dt=dt)
+        error_c = error_fraction(C[1:], C_est, d=2)
+        error_n = error_fraction(N[1:], N_est, d=2)
+        plot_estimates(C[1:], C_est, N[1:], N_est, dt=dt, error_c=error_c, error_n=error_n)
+    return dd_davide, [[N]]
 
 
 def load_lists(dates, dt=15 * 60, filepath_and_prefix_co2='data/co2_', filepath_and_prefix_N='data/N_', n_zones=27):
@@ -474,8 +517,10 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
                 print(f'plotting {dev_id}..')
                 print(len(N), len(C))
                 print(len(N_est), len(C_est))
-                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id-1} Mass Balance', x_vals=range(len(N)), width=0.5, x_label='Time steps')
-                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id-1} Linear Regression', x_vals=range(len(N)), width=0.5, x_label='Time steps')
+                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id - 1} Mass Balance',
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps')
+                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id - 1} Linear Regression',
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps')
 
         if N_list[dev_id][0] and dd_list[dev_id][0]:
             df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
@@ -601,7 +646,8 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
 
 
-def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None,zone_id=None, start_time=None, error_c=None, error_n=None, title='', width=4, alpha=0.4, x_label=''):
+def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, start_time=None, error_c=None,
+                   error_n=None, title='', width=4, alpha=0.4, x_label=''):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -634,7 +680,7 @@ def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None,zone_id=None, sta
         plt.title(title)
 
     ax2 = ax1.twinx()
-    ax2.bar(x_vals, N, color='red', alpha=alpha-0.2, width=width)
+    ax2.bar(x_vals, N, color='red', alpha=alpha - 0.2, width=width)
     ax2.bar(x_vals, N_est, color='orange', alpha=alpha, width=width)
 
     # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
@@ -716,7 +762,7 @@ def str_to_dt(t, chars_to_remove='T', digits_to_remove=1, f='%Y-%m-%d:%H:%M:%S.%
     return datetime.strptime(t, f)
 
 
-def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False, max_n=50):
+def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
     """
     Calculates the absolute difference between the estimated CO2
     and True CO2:
@@ -735,7 +781,7 @@ def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False, max_n=50):
     C_est, N_est = [], []
     for c, n, c_adj in zip(C, N, C_adj):
         C_est.append(C_estimate(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt))
-        N_est.append(N_estimate(x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt, max_n=max_n))
+        N_est.append(N_estimate(x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
 
     dist = 0
     if optimise_N:
@@ -780,7 +826,7 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
     return np.round(C_est, decimals=d)
 
 
-def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, max_n=50):
+def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0):
     """
     Given all necessary parameters, calculate the estimated
     number of occupants in a zone. Can take scalars and vector
@@ -839,7 +885,7 @@ def error_fraction(true_values, estimated_values, d=2):
 
 
 def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
-                       filename_parameters=None):
+                       filename_parameters=None, use_adjacent=True, v=None):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -854,7 +900,7 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
     :param filename_parameters: string of filename to store parameters in
     :return:
     """
-    C_adj_list = adjacent_co2(dd_list)
+    C_adj_list = adjacent_co2(dd_list, use_adjacent=use_adjacent)
 
     x = []
     for bound in bounds:
@@ -863,7 +909,7 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
     parameters, zone_ids = [], []
     empty_zones = []
     np.random.seed(41)
-    max_N = get_max_N(N_list)
+
     for i, device in enumerate(dd_list):
         # skip every iteration where zone has no occupancy/co2 data
         if device[0] and len(N_list[i][0]) > 0:
@@ -872,12 +918,12 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
             C = [[el[1] for el in period] for period in device]
             N = N_list[i]
             C_adj = C_adj_list[i]
-
-            v = np.array(V[i])
+            if v is None:
+                v = np.array(V[i])
             minimised = differential_evolution(
                 abs_distance,
                 x0=x,
-                args=(C, C_adj, N, v, m, dt, optimise_N, max_N[i],),
+                args=(C, C_adj, N, v, m, dt, optimise_N,),
                 bounds=bounds,
                 # method=method
             )
@@ -890,7 +936,7 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
                 C_est = C_est + [el for el in
                                  C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt)]
                 N_est = N_est + [el for el in
-                                 N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_N[i])]
+                                 N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt)]
             error_c = error_fraction(C_flat, C_est)
             error_n = error_fraction(N_flat, N_est)
             print(f'Zone {i}:\nAverage CO2 Error: {error_c[1]}\n'
