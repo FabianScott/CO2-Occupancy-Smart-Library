@@ -59,16 +59,16 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                 N = occupancy[date_index]
                 c_adj = C_adj[date_index]
                 # print(C, N, occupancy)
-                C_est = [C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)]
-                N_est = [N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_n)]
-                error_c = error_fraction([C[1:]], C_est)
-                error_n = error_fraction([N[1:]], N_est)
+                C_est = C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
+                N_est = N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_n)
+                error_c = error_fraction(C[1:], C_est)
+                error_n = error_fraction(N[1:], N_est)
 
                 E_list[zone_id].append([error_c[2], error_n[2]])  # only list of errors
                 E_summary_list[zone_id].append([error_c[:2], error_n[:2]])
                 param_id += 1
                 if plot:
-                    plot_estimates(C=[C], C_est=C_est, N=[N], N_est=N_est, dt=dt, zone_id=zone_id,
+                    plot_estimates(C=C[1:], C_est=C_est, N=N[1:], N_est=N_est, dt=dt, zone_id=zone_id,
                                    error_n=error_n[:2], error_c=error_c[1], start_time=device[date_index][0][0])
             zone_id += 1
 
@@ -151,8 +151,8 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
                 C_est, N_est = C_est.flatten(), N_est.flatten()
                 C_test, N_test = C_test.flatten(), N_test.flatten()
 
-                error_n = error_fraction([N_test], [N_est])
-                error_c = error_fraction([C_test], [C_est])
+                error_n = error_fraction(N_test, N_est)
+                error_c = error_fraction(C_test, C_est)
 
                 C_test, N_test = np.array([0] + [el for el in C_test]), np.array([0] + [el for el in N_test])
 
@@ -164,7 +164,7 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
                 error_c = error_fraction([C_test[1:]], [C_est])
 
             if plot:
-                plot_estimates(C=[C_test], C_est=[C_est], N=[N_test], N_est=[N_est], dt=dt, zone_id=zone_id,
+                plot_estimates(C=C_test[1:], C_est=C_est, N=N_test[1:], N_est=N_est, dt=dt, zone_id=zone_id,
                                error_c=error_c[:2], error_n=error_n[:2], start_time=start_time, title='Lin Reg')
             E_list[zone_id].append([error_c[2], error_n[2]])
 
@@ -240,7 +240,8 @@ def load_and_use_parameters(filepath_parameters, period_index, device_data_list,
         error_c = error_fraction(c, C_est)
         error_n = error_fraction(n, N_est)
 
-        plot_estimates(c, C_est, n, N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c[1], error_n[:2])
+        plot_estimates(c[1:], C_est, n[1:], N_est, dt, zone_id, device_data_list[zone_id][0][0], error_c[1],
+                       error_n[:2])
 
 
 def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='%Y-%m-%d:%H:%M:%S.%f',
@@ -438,30 +439,49 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
 
     dev_id = 0
     for device, device_N, device_errors, device_errors_reg in zip(dd_list, N_list, E_list, E_list_reg):
-        for period, period_N, period_errors, period_errors_reg in zip(device, device_N, device_errors, device_errors_reg):
-            for co2, n, error_co2, error_N, error_co2_reg, error_N_reg in zip(np.array(period)[:, 1], period_N, period_errors[0], period_errors[1], period_errors_reg[0][1:], period_errors_reg[1][1:]):
+        C, C_est, C_est_reg, N, N_est, N_est_reg = [], [], [], [], [], []
+        for period, period_N, period_errors, period_errors_reg in zip(device, device_N, device_errors,
+                                                                      device_errors_reg):
+            for co2, n, error_co2, error_N, error_co2_reg, error_N_reg in zip(np.array(period)[:, 1], period_N,
+                                                                              period_errors[0], period_errors[1],
+                                                                              period_errors_reg[0][1:],
+                                                                              period_errors_reg[1][1:]):
+                C.append(co2)
+                C_est.append(co2 + error_co2)
+                C_est_reg.append(co2 + error_co2_reg)
+                N.append(n)
+                N_est.append(n + error_N)
+                N_est_reg.append(n + error_N_reg)
+
                 all_co2.append(co2)
                 all_N.append(n)
-                errors_co2.append((error_co2))
-                errors_N.append((error_N))
+                errors_co2.append(error_co2)
+                errors_N.append(error_N)
                 EBD_co2[dev_id].append(abs(error_co2))
                 EBD_N[dev_id].append(abs(error_N))
                 detected[dev_id].append(bool(n) and bool(n + error_N))
 
-                errors_co2_reg.append((error_co2_reg))
-                errors_N_reg.append((error_N_reg))
+                errors_co2_reg.append(error_co2_reg)
+                errors_N_reg.append(error_N_reg)
                 EBD_N_reg[dev_id].append(abs(error_N_reg))
                 EBD_co2_reg[dev_id].append(abs(error_co2_reg))
                 detected_reg[dev_id].append(bool(n) and bool(n + error_N_reg))
 
                 all_detected.append(bool(n) and bool(n + error_N))
                 all_detected_reg.append(bool(n) and bool(n + error_N_reg))
+        if plot:
+            if C_est and N_est:
+                print(f'plotting {dev_id}..')
+                print(len(N), len(C))
+                print(len(N_est), len(C_est))
+                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id-1} Mass Balance', x_vals=range(len(N)), width=0.5, x_label='Time steps')
+                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id-1} Linear Regression', x_vals=range(len(N)), width=0.5, x_label='Time steps')
 
         if N_list[dev_id][0] and dd_list[dev_id][0]:
             df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
             print(f'McNemar p-value for detecting occupancy zone {dev_id}:\n{mcnemar(df)}')
-            detected[dev_id] = sum(detected[dev_id])/len(detected[dev_id])
-            detected_reg[dev_id] = sum(detected_reg[dev_id])/len(detected_reg[dev_id])
+            detected[dev_id] = sum(detected[dev_id]) / len(detected[dev_id])
+            detected_reg[dev_id] = sum(detected_reg[dev_id]) / len(detected_reg[dev_id])
             print('\nFor MB:\n')
             temp = pd.Series(EBD_N[dev_id])
             print(f'N error summary for zone {dev_id}:\n'
@@ -483,8 +503,6 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         dev_id += 1
 
     if plot:
-        plot_estimates(all_co2, np.array(all_co2) + np.array(errors_co2), all_N, np.array(all_N) + np.array(errors_N))
-
         plt.scatter(all_co2, errors_co2, marker='.')
         cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
         plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
@@ -583,7 +601,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
 
 
-def plot_estimates(C, C_est, N, N_est, dt=60*15, zone_id=None, start_time=None, error_c=None, error_n=None, title=''):
+def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None,zone_id=None, start_time=None, error_c=None, error_n=None, title='', width=4, alpha=0.4, x_label=''):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -599,22 +617,25 @@ def plot_estimates(C, C_est, N, N_est, dt=60*15, zone_id=None, start_time=None, 
     :return:
     """
 
-
     fig, ax1 = plt.subplots(1, 1)
-    i = 0
-    x_vals = np.arange(0, len(C_est[i]) * dt / 60, dt / 60)
-    ax1.plot(x_vals, C[i][1:], color='b')
-    ax1.plot(x_vals, C_est[i], color='c')
+    if x_vals is None:
+        x_vals = np.arange(0, len(C_est) * dt / 60, dt / 60)
+    ax1.plot(x_vals, C, color='b')
+    ax1.plot(x_vals, C_est, color='c')
     plt.ylabel('CO2 concentration (ppm)')
-    plt.xlabel('Time (min)')
-    plt.title(
-        f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
-        f'. CO2 error: {error_c}, N error: {error_n}\n Blue is true C, Red is true N, {title}'
-    )
+    if x_label == '':
+        plt.xlabel('Time (min)')
+    if title == '':
+        plt.title(
+            f'Measured CO2 level vs estimate from optimisation in zone {zone_id}\nat start time {start_time}\nAvg'
+            f'. CO2 error: {error_c}, N error: {error_n}\n Blue is true C, Red is true N'
+        )
+    else:
+        plt.title(title)
 
     ax2 = ax1.twinx()
-    ax2.bar(x_vals, N[i][1:], color='red', alpha=0.4, width=4)
-    ax2.bar(x_vals, N_est[i], color='orange', alpha=0.4, width=4)
+    ax2.bar(x_vals, N, color='red', alpha=alpha-0.2, width=width)
+    ax2.bar(x_vals, N_est, color='orange', alpha=alpha, width=width)
 
     # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
     # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
@@ -745,7 +766,7 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
     Q = Q_adj + Q_out
 
     N = np.array(N)
-    C = np.array(C) / ppm_factor     # ppm
+    C = np.array(C) / ppm_factor  # ppm
     C_adj = np.array(C_adj)[1:] / ppm_factor
 
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
@@ -779,7 +800,7 @@ def N_estimate(x, C, C_adj, V, dt=15 * 60, m=15, d=0, max_n=50):
     Q = Q_adj + Q_out
 
     C_adj = np.array(C_adj)[1:] / ppm_factor
-    C = np.array(C) / ppm_factor     # ppm
+    C = np.array(C) / ppm_factor  # ppm
     Ci = C[:-1]
     C = C[1:]
     N = np.array(V * (C - (1 - Q * dt) * Ci -
@@ -809,16 +830,11 @@ def error_fraction(true_values, estimated_values, d=2):
     error_list = []
     if len(true_values) != len(estimated_values):
         print('Dimension mismatch between true and estimated outer lists')
-    for T, E in zip(true_values, estimated_values):
-        if len(T) != len(E):
-            # print(f'Dimension mismatch between true and estimated period lists: {len(T), len(E)}')
-            if len(T) - 1 == len(E):
-                # print('Corrected, hopefully')
-                T = T[1:]
-        for t, e in zip(T, E):
-            n_false += not t == e
-            error_list.append(t - e)
-            n_total += 1
+        print(len(true_values), len(estimated_values))
+    for t, e in zip(true_values, estimated_values):
+        n_false += not t == e
+        error_list.append(t - e)
+        n_total += 1
     return np.round(n_false / n_total, d), np.round(sum(np.abs(error_list)) / n_total, d), error_list
 
 
@@ -867,11 +883,16 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
             )
 
             C_est, N_est = [], []
+            C_flat, N_flat = [], []
             for c, n, c_adj in zip(C, N, C_adj):
-                C_est.append(C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt))
-                N_est.append(N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_N[i]))
-            error_c = error_fraction(C, C_est)
-            error_n = error_fraction(N, N_est)
+                C_flat = C_flat + [el for el in c[1:]]
+                N_flat = N_flat + [el for el in n[1:]]
+                C_est = C_est + [el for el in
+                                 C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt)]
+                N_est = N_est + [el for el in
+                                 N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt, max_n=max_N[i])]
+            error_c = error_fraction(C_flat, C_est)
+            error_n = error_fraction(N_flat, N_est)
             print(f'Zone {i}:\nAverage CO2 Error: {error_c[1]}\n'
                   f'Occupancy error (proportion wrong, average error): {error_n[:2]}')
 

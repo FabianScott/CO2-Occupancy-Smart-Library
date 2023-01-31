@@ -6,7 +6,7 @@ from Functions import simple_models_hold_out, hold_out, adjacent_co2, residual_a
     load_data, load_occupancy, load_lists, plot_estimates, optimise_occupancy, N_estimate, C_estimate
 
 dates = ['2022_24_11', '2022_30_11', '2022_07_12', '2022_09_12', '2022_14_12', '2023_18_01', '2023_19_01']#, '2023_25_01']
-# dates = dates[:2]
+#dates = dates[:3]
 
 # hold-out method:
 error_file = 'parameters/e.txt'
