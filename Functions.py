@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from copy import copy
+from sigfig import round
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from scipy.stats import norm, wilcoxon, probplot, shapiro
@@ -8,7 +9,6 @@ from scipy.optimize import differential_evolution
 from sklearn.linear_model import LinearRegression
 from constants import V, bounds, id_map, ppm_factor
 from statsmodels.stats.contingency_tables import mcnemar
-
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
              summary_errors=None, no_steps=0):
@@ -25,8 +25,8 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
     """
 
     N_list, dd_list = load_lists(dates, dt)
-    # dimension 0 -> zone, dimension 1 -> (Q_adj, Q_out, C_out, m), dimension 2 -> (error_co2, error_n)
-    sensitivity_list = [[[] for _ in range(4)] for _ in dd_list] # periods simply appended in series
+    # dimension 0 -> zone, dimension 1 -> (Q_adj, Q_out, C_out, m), dimension 2 -> (error_n, x_val)
+    sensitivity_list = [[[[] for _ in dates] for _ in range(4)] for _ in dd_list]  # periods simply appended in series
     # dimension 0 -> zone, dimension 1 -> period, dimension 2 -> CO2,N error, dimension 3 -> proportion,avg.,list
     E_list = [[] for _ in N_list]
     E_summary_list = [[] for _ in N_list]
@@ -75,17 +75,18 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                 if no_steps:
                     start = [el[0] for el in bounds]
                     end = [el[1] for el in bounds]
-                    increments = [(el2-el1)/no_steps for el1, el2 in zip(start, end)]
+                    increments = [(el2 - el1) / no_steps for el1, el2 in zip(start, end)]
                     for sens_index in range(4):
-                        temp_params = parameters[param_id]
+                        # Reset the parameters to the optimal ones
+                        temp_params = copy(parameters[param_id])
                         for increment_factor in range(no_steps):
                             temp_params[sens_index] = increment_factor * increments[sens_index] + start[sens_index]
                             C_est = C_estimate(x=temp_params, C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
                             N_est = N_estimate(x=temp_params, C=C, C_adj=c_adj, V=v, m=m, dt=dt)
                             error_c = error_fraction(C[1:], C_est)
                             error_n = error_fraction(N[1:], N_est)
-                            print(zone_id, sens_index)
-                            sensitivity_list[zone_id][sens_index].append([error_c[1], error_n[1], increment_factor])
+                            sensitivity_list[zone_id][sens_index][date_index].append(
+                                [temp_params[sens_index], error_n[1]])
                 param_id += 1
 
             zone_id += 1
@@ -187,6 +188,30 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
             E_list[zone_id].append([error_c[2], error_n[2]])
 
     return E_list
+
+
+def return_average_parameters(dates, filename_parameters):
+    """
+    Given a list of dates and the filename used to store
+    the optimised parameters, calculate the average in each zone
+    and return this in the same format as the parameter files,
+    along with the standard deviation.
+    :param dates:
+    :param filename_parameters:
+    :return:
+    """
+    filenames_parameters = ['parameters/' + filename_parameters + '_' + date + '.csv' for date in dates]
+    initial_frame = pd.read_csv(filenames_parameters[0]).values[:, 1:]
+    all_parameters = np.zeros((initial_frame.shape[0], initial_frame.shape[1], len(filenames_parameters)))
+
+    for i, parameter_file in enumerate(filenames_parameters):
+        current_parameters = pd.read_csv(parameter_file).values[:, 1:]
+        if i:
+            initial_frame = initial_frame + current_parameters
+        all_parameters[:, :, i] = current_parameters
+
+    avg_parameters = initial_frame / len(filenames_parameters)
+    return avg_parameters, np.std(all_parameters, axis=2)
 
 
 # %% Loading
@@ -387,6 +412,24 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
 
 # %% Helpers
 
+def matrix_to_latex(table, d=2):
+    """
+    Given a 2D array like, return a string which can be
+    copied directly into a LaTex table, one can specify the
+    number of decimals to be rounded to.
+    :param table:
+    :param d:
+    :return: out
+    """
+    out = ''
+    np.round(np.asarray(table), d)
+    for row_mean in table:
+        for el in row_mean:
+            out = out + f'{round(el, d)} & '
+        out = out[:-1] + ' \\\\ \n'
+    return out[:-7]
+
+
 def get_max_N(N_list):
     """
     Find the maximum occupancy for each zone in an N_list
@@ -518,9 +561,9 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
                 print(len(N), len(C))
                 print(len(N_est), len(C_est))
                 plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id - 1} Mass Balance',
-                               x_vals=range(len(N)), width=0.5, x_label='Time steps')
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps', save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
                 plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id - 1} Linear Regression',
-                               x_vals=range(len(N)), width=0.5, x_label='Time steps')
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps', save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
 
         if N_list[dev_id][0] and dd_list[dev_id][0]:
             df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
@@ -643,11 +686,54 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     df = pd.crosstab(all_detected, all_detected_reg)
     print(f'McNemar p-value for detecting occupancy:\n{mcnemar(df)}')
 
-    return EBD_N, EBD_co2, detected, EBD_N_reg, EBD_co2_reg, detected_reg
+    table_mean, table_std = [], []
+    zone_id = 0
+    for error_n_mb, error_n_lr, error_co2_mb, error_co2_lr, error_detected_mb, error_detected_lr in zip(EBD_N,
+                                                                                                        EBD_N_reg,
+                                                                                                        EBD_co2,
+                                                                                                        EBD_co2_reg,
+                                                                                                        detected,
+                                                                                                        detected_reg):
+        if error_n_mb:
+            table_mean.append(
+                [zone_id, error_n_mb[0], error_n_lr[0], error_co2_mb[0], error_co2_lr[0], error_detected_mb, error_detected_lr])
+            table_std.append([zone_id, error_n_mb[1], error_n_lr[1], error_co2_mb[1], error_co2_lr[1]])
+        zone_id += 1
+    table_mean, table_std = np.asarray(table_mean), np.asarray(table_std)
+    return table_mean, table_std
+
+
+def sensitivity_plots(sensitivity_list, filepath_plots='documents/plots/'):
+    """
+    Using the sensitivity list, do the plots
+
+    :param sensitivity_list:
+    :param filepath_plots:
+    :return:
+    """
+    # dimension 0 -> (Q_adj, Q_out, C_out, m), dimension 1 -> zone
+    sens_plotting_list = [[] for _ in range(4)]
+    legend = []
+    for zone_id, zone in enumerate(sensitivity_list):
+        if zone[0][0]:
+            legend.append(f'Zone {zone_id}')
+            for i in range(4):
+                temp = np.array([np.array(el) for el in zone[i]])
+                sens_plotting_list[i].append(np.array(zone[i]).mean(axis=0))
+    x_labels = ['Q_adj', 'Q_out', 'C_out', 'm']
+    for sens_set, x_label in zip(sens_plotting_list, x_labels):
+        for zone_line in sens_set:
+            plt.plot(zone_line[:, 0], zone_line[:, 1])
+        plt.xlabel(x_label)
+        plt.ylabel('N error')
+        plt.legend(legend)
+        plt.title('N error plotted against ' + x_label)
+        plt.savefig(filepath_plots + 'sensitivity_' + x_label)
+        plt.show()
 
 
 def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, start_time=None, error_c=None,
-                   error_n=None, title='', width=4, alpha=0.4, x_label=''):
+                   error_n=None, title='', width=4, alpha=0.4, x_label='', save_filename=None):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -682,12 +768,13 @@ def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, st
     ax2 = ax1.twinx()
     ax2.bar(x_vals, N, color='red', alpha=alpha - 0.2, width=width)
     ax2.bar(x_vals, N_est, color='orange', alpha=alpha, width=width)
-
+    plt.tight_layout()
     # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
     # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
     # ax1.set_xticklabels(ax1.get_xticks(), rotation=30)
     # ax2.set_xticklabels(ax2.get_xticks(), rotation=30)
-
+    if save_filename is not None:
+        plt.savefig(save_filename)
     plt.show()
 
 
