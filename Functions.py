@@ -391,7 +391,8 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
                     co2_smoothed = exponential_moving_average(temp, tau=dt)
                 elif smoothing_type[0].lower() == 'k':
                     co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
-
+                if co2_smoothed < 200:
+                    print(0)
                 new_data.append((temp_time, co2_smoothed))
             else:  # Time and None if nothing recorded unless it is replaced by the average
                 emp = None
@@ -425,7 +426,7 @@ def matrix_to_latex(table, d=2):
     np.round(np.asarray(table), d)
     for row_mean in table:
         for el in row_mean:
-            out = out + f'{round(el, d)} & '
+            out = out + f'{round(el, sigfigs=d)} & '
         out = out[:-1] + ' \\\\ \n'
     return out[:-7]
 
@@ -515,12 +516,16 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
 
 
 def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/', plot=True):
+    from scipy.stats import norm, wilcoxon, probplot, shapiro
+    from statsmodels.stats.contingency_tables import mcnemar
     all_co2, all_N, errors_co2, errors_N = [], [], [], []
     errors_co2_reg, errors_N_reg = [], []
     # errors by device (EBD) dimension 0 -> device, dimension 1 -> mean,std
     EBD_N, EBD_co2 = [[] for _ in dd_list], [[] for _ in dd_list]
     EBD_N_reg, EBD_co2_reg = [[] for _ in dd_list], [[] for _ in dd_list]
     detected, detected_reg = [[] for _ in dd_list], [[] for _ in dd_list]
+    detected_noneg, detected_reg_noneg = [[] for _ in dd_list], [[] for _ in dd_list]
+
     all_detected, all_detected_reg = [], []
 
     dev_id = 0
@@ -545,13 +550,15 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
                 errors_N.append(error_N)
                 EBD_co2[dev_id].append(abs(error_co2))
                 EBD_N[dev_id].append(abs(error_N))
-                detected[dev_id].append(bool(n) and bool(n + error_N))
+                detected[dev_id].append(bool(n) == bool(n + error_N))
+                detected_noneg[dev_id].append(bool(n) == (n + error_N >= 0))
 
                 errors_co2_reg.append(error_co2_reg)
                 errors_N_reg.append(error_N_reg)
                 EBD_N_reg[dev_id].append(abs(error_N_reg))
                 EBD_co2_reg[dev_id].append(abs(error_co2_reg))
-                detected_reg[dev_id].append(bool(n) and bool(n + error_N_reg))
+                detected_reg[dev_id].append(bool(n) == bool(n + error_N_reg))
+                detected_reg_noneg[dev_id].append(bool(n) == (n + error_N_reg >= 0))
 
                 all_detected.append(bool(n) and bool(n + error_N))
                 all_detected_reg.append(bool(n) and bool(n + error_N_reg))
@@ -568,8 +575,11 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         if N_list[dev_id][0] and dd_list[dev_id][0]:
             df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
             print(f'McNemar p-value for detecting occupancy zone {dev_id}:\n{mcnemar(df)}')
-            detected[dev_id] = sum(detected[dev_id]) / len(detected[dev_id])
-            detected_reg[dev_id] = sum(detected_reg[dev_id]) / len(detected_reg[dev_id])
+            detected[dev_id] = 1 - sum(detected[dev_id]) / len(detected[dev_id])
+            detected_reg[dev_id] = 1 - sum(detected_reg[dev_id]) / len(detected_reg[dev_id])
+            detected_noneg[dev_id] = 1 - sum(detected_noneg[dev_id]) / len(detected_noneg[dev_id])
+            detected_reg_noneg[dev_id] = 1 - sum(detected_reg_noneg[dev_id]) / len(detected_reg_noneg[dev_id])
+
             print('\nFor MB:\n')
             temp = pd.Series(EBD_N[dev_id])
             print(f'N error summary for zone {dev_id}:\n'
@@ -596,7 +606,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
         plt.ylabel('Residual')
         plt.xlabel('CO2')
-        plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
+        plt.savefig(filepath_plots + '_MB', bbox_inches='tight')
         plt.show()
 
         plt.scatter(all_N, errors_N, marker='.')
@@ -604,7 +614,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual')
         plt.xlabel('N')
-        plt.savefig(filepath_plots + 'N_residual')
+        plt.savefig(filepath_plots + 'N_residual_MB')
         plt.show()
 
         plt.scatter(all_co2, errors_N, marker='.')
@@ -612,7 +622,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual N')
         plt.xlabel('CO2')
-        plt.savefig(filepath_plots + 'co2_N_residual')
+        plt.savefig(filepath_plots + 'co2_N_residual_MB')
         plt.show()
 
         plt.scatter(all_co2, errors_co2_reg, marker='.')
@@ -620,7 +630,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'CO2 residual plot reg\nCorrelation: {cor_co2}')
         plt.ylabel('Residual')
         plt.xlabel('CO2')
-        plt.savefig(filepath_plots + 'co2_residual', bbox_inches='tight')
+        plt.savefig(filepath_plots + 'co2_residual_LR', bbox_inches='tight')
         plt.show()
 
         plt.scatter(all_N, errors_N_reg, marker='.')
@@ -628,7 +638,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual')
         plt.xlabel('N')
-        plt.savefig(filepath_plots + 'N_residual')
+        plt.savefig(filepath_plots + 'N_residual_LR')
         plt.show()
 
         plt.scatter(all_co2, errors_N_reg, marker='.')
@@ -636,7 +646,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
         plt.ylabel('Residual')
         plt.xlabel('N')
-        plt.savefig(filepath_plots + 'co2_N_residual')
+        plt.savefig(filepath_plots + 'co2_N_residual_LR')
         plt.show()
 
         probplot(errors_N, dist="norm", plot=plt)
@@ -687,20 +697,25 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     print(f'McNemar p-value for detecting occupancy:\n{mcnemar(df)}')
 
     table_mean, table_std = [], []
+    table_detect_noneg = []
     zone_id = 0
-    for error_n_mb, error_n_lr, error_co2_mb, error_co2_lr, error_detected_mb, error_detected_lr in zip(EBD_N,
+    for error_n_mb, error_n_lr, error_co2_mb, error_co2_lr, error_detected_mb, error_detected_lr, el1, el2 in zip(EBD_N,
                                                                                                         EBD_N_reg,
                                                                                                         EBD_co2,
                                                                                                         EBD_co2_reg,
                                                                                                         detected,
-                                                                                                        detected_reg):
+                                                                                                        detected_reg,
+                                                                                                        detected_noneg,
+                                                                                                        detected_reg_noneg):
         if error_n_mb:
             table_mean.append(
                 [zone_id, error_n_mb[0], error_n_lr[0], error_co2_mb[0], error_co2_lr[0], error_detected_mb, error_detected_lr])
             table_std.append([zone_id, error_n_mb[1], error_n_lr[1], error_co2_mb[1], error_co2_lr[1]])
+            table_detect_noneg.append([el1, el2])
         zone_id += 1
     table_mean, table_std = np.asarray(table_mean), np.asarray(table_std)
-    return table_mean, table_std
+
+    return table_mean, table_std, table_detect_noneg
 
 
 def sensitivity_plots(sensitivity_list, filepath_plots='documents/plots/'):
