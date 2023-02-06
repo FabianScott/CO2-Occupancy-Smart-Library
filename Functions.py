@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from copy import copy
+from copy import copy, deepcopy
 from sigfig import round
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
@@ -9,6 +9,7 @@ from scipy.optimize import differential_evolution
 from sklearn.linear_model import LinearRegression
 from constants import V, bounds, id_map, ppm_factor
 from statsmodels.stats.contingency_tables import mcnemar
+
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
              summary_errors=None, no_steps=0):
@@ -78,17 +79,16 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                     increments = [(el2 - el1) / no_steps for el1, el2 in zip(start, end)]
                     for sens_index in range(4):
                         # Reset the parameters to the optimal ones
-                        temp_params = copy(parameters[param_id])
+                        temp_params = deepcopy(parameters[param_id])
                         for increment_factor in range(no_steps):
                             temp_params[sens_index] = increment_factor * increments[sens_index] + start[sens_index]
                             C_est = C_estimate(x=temp_params, C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
                             N_est = N_estimate(x=temp_params, C=C, C_adj=c_adj, V=v, m=m, dt=dt)
                             error_c = error_fraction(C[1:], C_est)
-                            error_n = error_fraction(N[1:], N_est)
+                            error_n_sens = error_fraction(N[1:], N_est)
                             sensitivity_list[zone_id][sens_index][date_index].append(
-                                [temp_params[sens_index], error_n[1]])
+                                [temp_params[sens_index], error_n_sens[1]])
                 param_id += 1
-
             zone_id += 1
 
     if summary_errors is not None:
@@ -107,7 +107,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
 def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False, n_zones=27):
     """
     Given dates, this function loads the device data and occupancy
-    lists and uses them to to hold-out validation of simpler methods.
+    lists and uses them to hold-out validation of simpler methods.
     For Linear Regression the scatter plot and regression line can be
     shown in a plot, while the results in a specific zone can alway be
     plotted no matter the method. Curently there is Linear Regression
@@ -351,7 +351,7 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
             device_id = id_map[row[id_index]]
             device_data_list[device_id].append([time, co2])
     try:
-        zone_averages = pd.read_csv(filepath_averages).values
+        zone_averages = pd.read_csv(filepath_averages).values[:, 1:]
     except FileNotFoundError:
         # 600 is a decent estimate
         zone_averages = np.ones((n_zones + 1, 96)) * 600
@@ -391,17 +391,16 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
                     co2_smoothed = exponential_moving_average(temp, tau=dt)
                 elif smoothing_type[0].lower() == 'k':
                     co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
-                if co2_smoothed < 200:
-                    print(0)
                 new_data.append((temp_time, co2_smoothed))
             else:  # Time and None if nothing recorded unless it is replaced by the average
                 emp = None
                 # print(f'Time {temp_time} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
-                    column = int(temp_time.hour * 4 + temp_time.minute / dt)
+                    column = int(temp_time.hour * 4 + temp_time.minute / dt) + 1
                     emp = zone_averages[i, column] * (1 - replace) + replace * new_data[-1][1] \
                         if len(new_data) > 0 else zone_averages[i, column]
+
                 new_data.append([temp_time, emp])
             # Increment relevant time
             temp_time = temp_time + timedelta(minutes=dt)
@@ -413,20 +412,24 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
 
 # %% Helpers
 
-def matrix_to_latex(table, d=2):
+def matrix_to_latex(table, d=2, zone_index=True):
     """
     Given a 2D array like, return a string which can be
     copied directly into a LaTex table, one can specify the
     number of decimals to be rounded to.
     :param table:
     :param d:
+    :param zone_index:
     :return: out
     """
     out = ''
     np.round(np.asarray(table), d)
     for row_mean in table:
-        for el in row_mean:
-            out = out + f'{round(el, sigfigs=d)} & '
+        for i, el in enumerate(row_mean):
+            if i == 0:
+                out = out + f'{int(el)} & '
+            else:
+                out = out + f'{round(el, sigfigs=d)} & '
         out = out[:-1] + ' \\\\ \n'
     return out[:-7]
 
@@ -515,7 +518,7 @@ def kalman_estimates(C, min_error=50, error_proportion=0.03):
     return estimates, E_est_list
 
 
-def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/', plot=True):
+def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='documents/plots/', plot=True, do_summary=False):
     from scipy.stats import norm, wilcoxon, probplot, shapiro
     from statsmodels.stats.contingency_tables import mcnemar
     all_co2, all_N, errors_co2, errors_N = [], [], [], []
@@ -565,39 +568,12 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         if plot:
             if C_est and N_est:
                 print(f'plotting {dev_id}..')
-                print(len(N), len(C))
-                print(len(N_est), len(C_est))
-                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id - 1} Mass Balance',
-                               x_vals=range(len(N)), width=0.5, x_label='Time steps', save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
-                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id - 1} Linear Regression',
-                               x_vals=range(len(N)), width=0.5, x_label='Time steps', save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
-
-        if N_list[dev_id][0] and dd_list[dev_id][0]:
-            df = pd.crosstab(detected[dev_id], detected_reg[dev_id])
-            print(f'McNemar p-value for detecting occupancy zone {dev_id}:\n{mcnemar(df)}')
-            detected[dev_id] = 1 - sum(detected[dev_id]) / len(detected[dev_id])
-            detected_reg[dev_id] = 1 - sum(detected_reg[dev_id]) / len(detected_reg[dev_id])
-            detected_noneg[dev_id] = 1 - sum(detected_noneg[dev_id]) / len(detected_noneg[dev_id])
-            detected_reg_noneg[dev_id] = 1 - sum(detected_reg_noneg[dev_id]) / len(detected_reg_noneg[dev_id])
-
-            print('\nFor MB:\n')
-            temp = pd.Series(EBD_N[dev_id])
-            print(f'N error summary for zone {dev_id}:\n'
-                  f'{temp.describe()}')
-            EBD_N[dev_id] = [np.mean(EBD_N[dev_id]), np.std(EBD_N[dev_id])]
-            temp = pd.Series(EBD_co2[dev_id])
-            print(f'CO2 error summary for zone {dev_id}:\n'
-                  f'{temp.describe()}')
-            EBD_co2[dev_id] = [np.mean(EBD_co2[dev_id]), np.std(EBD_co2[dev_id])]
-            print('\nFor Reg:\n')
-            temp = pd.Series(EBD_N_reg[dev_id])
-            print(f'N error summary for zone {dev_id}:\n'
-                  f'{temp.describe()}')
-            EBD_N_reg[dev_id] = [np.mean(EBD_N_reg[dev_id]), np.std(EBD_N_reg[dev_id])]
-            temp = pd.Series(EBD_co2_reg[dev_id])
-            print(f'CO2 error summary for zone {dev_id}:\n'
-                  f'{temp.describe()}')
-            EBD_co2_reg[dev_id] = [np.mean(EBD_co2_reg[dev_id]), np.std(EBD_co2_reg[dev_id])]
+                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id} Mass Balance',
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps',
+                               save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
+                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id} Linear Regression',
+                               x_vals=range(len(N)), width=0.5, x_label='Time steps',
+                               save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
         dev_id += 1
 
     if plot:
@@ -606,7 +582,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
         plt.ylabel('Residual')
         plt.xlabel('CO2')
-        plt.savefig(filepath_plots + '_MB', bbox_inches='tight')
+        plt.savefig(filepath_plots + 'co2_residual_MB', bbox_inches='tight')
         plt.show()
 
         plt.scatter(all_N, errors_N, marker='.')
@@ -674,22 +650,24 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.show()
 
     print('For N:')
-    print('Summary for mass balance errors:')
-    temp = pd.Series(np.abs(errors_N))
-    print(temp.describe())
-    print('Summary for linear regression errors:')
-    temp = pd.Series(np.abs(errors_N_reg))
-    print(temp.describe())
+    if do_summary:
+        print('Summary for mass balance errors:')
+        temp = pd.Series(np.abs(errors_N))
+        print(temp.describe())
+        print('Summary for linear regression errors:')
+        temp = pd.Series(np.abs(errors_N_reg))
+        print(temp.describe())
     wilcox = wilcoxon(all_N, errors_N_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
     print('For co2:')
-    print('Summary for mass balance errors:')
-    temp = pd.Series(np.abs(errors_co2))
-    print(temp.describe())
-    print('Summary for linear regression errors:')
-    temp = pd.Series(np.abs(errors_co2_reg))
-    print(temp.describe())
+    if do_summary:
+        print('Summary for mass balance errors:')
+        temp = pd.Series(np.abs(errors_co2))
+        print(temp.describe())
+        print('Summary for linear regression errors:')
+        temp = pd.Series(np.abs(errors_co2_reg))
+        print(temp.describe())
     wilcox = wilcoxon(all_co2, errors_co2_reg)
     print(f'P-values for wilcox rank sum test {wilcox.pvalue}')
 
@@ -700,16 +678,17 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     table_detect_noneg = []
     zone_id = 0
     for error_n_mb, error_n_lr, error_co2_mb, error_co2_lr, error_detected_mb, error_detected_lr, el1, el2 in zip(EBD_N,
-                                                                                                        EBD_N_reg,
-                                                                                                        EBD_co2,
-                                                                                                        EBD_co2_reg,
-                                                                                                        detected,
-                                                                                                        detected_reg,
-                                                                                                        detected_noneg,
-                                                                                                        detected_reg_noneg):
+                                                                                                                  EBD_N_reg,
+                                                                                                                  EBD_co2,
+                                                                                                                  EBD_co2_reg,
+                                                                                                                  detected,
+                                                                                                                  detected_reg,
+                                                                                                                  detected_noneg,
+                                                                                                                  detected_reg_noneg):
         if error_n_mb:
             table_mean.append(
-                [zone_id, error_n_mb[0], error_n_lr[0], error_co2_mb[0], error_co2_lr[0], error_detected_mb, error_detected_lr])
+                [zone_id, error_n_mb[0], error_n_lr[0], error_co2_mb[0], error_co2_lr[0], error_detected_mb,
+                 error_detected_lr])
             table_std.append([zone_id, error_n_mb[1], error_n_lr[1], error_co2_mb[1], error_co2_lr[1]])
             table_detect_noneg.append([el1, el2])
         zone_id += 1
@@ -718,11 +697,13 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
     return table_mean, table_std, table_detect_noneg
 
 
-def sensitivity_plots(sensitivity_list, filepath_plots='documents/plots/'):
+def sensitivity_plots(sensitivity_list, avg_params, avg_errors,filepath_plots='documents/plots/'):
     """
     Using the sensitivity list, do the plots
 
     :param sensitivity_list:
+    :param avg_params:          matrix of average parameters found through optimisation
+    :param avg_errors:          vector of average errors for parameters
     :param filepath_plots:
     :return:
     """
@@ -732,18 +713,21 @@ def sensitivity_plots(sensitivity_list, filepath_plots='documents/plots/'):
     for zone_id, zone in enumerate(sensitivity_list):
         if zone[0][0]:
             legend.append(f'Zone {zone_id}')
+            legend.append('_Hidden label')
             for i in range(4):
                 temp = np.array([np.array(el) for el in zone[i]])
                 sens_plotting_list[i].append(np.array(zone[i]).mean(axis=0))
     x_labels = ['Q_adj', 'Q_out', 'C_out', 'm']
-    for sens_set, x_label in zip(sens_plotting_list, x_labels):
-        for zone_line in sens_set:
+    for sens_set, x_label, avg_param in zip(sens_plotting_list, x_labels, avg_params.T):
+        for i, zone_line in enumerate(sens_set):
             plt.plot(zone_line[:, 0], zone_line[:, 1])
+            plt.scatter(avg_param[i], avg_errors[i])
         plt.xlabel(x_label)
         plt.ylabel('N error')
         plt.legend(legend)
-        plt.title('N error plotted against ' + x_label)
-        plt.savefig(filepath_plots + 'sensitivity_' + x_label)
+        plt.title('Average N error plotted against ' + x_label)
+        if filepath_plots != '':
+            plt.savefig(filepath_plots + 'sensitivity_' + x_label)
         plt.show()
 
 
