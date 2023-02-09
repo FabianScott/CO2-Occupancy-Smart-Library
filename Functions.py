@@ -27,7 +27,8 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
 
     N_list, dd_list = load_lists(dates, dt)
     # dimension 0 -> zone, dimension 1 -> (Q_adj, Q_out, C_out, m), dimension 2 -> (error_n, x_val)
-    sensitivity_list = [[[[] for _ in dates] for _ in range(4)] for _ in dd_list]  # periods simply appended in series
+    sensitivity_list_N = [[[[] for _ in dates] for _ in range(4)] for _ in dd_list]  # periods simply appended in series
+    sensitivity_list_C = [[[[] for _ in dates] for _ in range(4)] for _ in dd_list]
     # dimension 0 -> zone, dimension 1 -> period, dimension 2 -> CO2,N error, dimension 3 -> proportion,avg.,list
     E_list = [[] for _ in N_list]
     E_summary_list = [[] for _ in N_list]
@@ -84,10 +85,15 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                             temp_params[sens_index] = increment_factor * increments[sens_index] + start[sens_index]
                             C_est = C_estimate(x=temp_params, C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
                             N_est = N_estimate(x=temp_params, C=C, C_adj=c_adj, V=v, m=m, dt=dt)
-                            error_c = error_fraction(C[1:], C_est)
+                            error_c_sens = error_fraction(C[1:], C_est)
                             error_n_sens = error_fraction(N[1:], N_est)
-                            sensitivity_list[zone_id][sens_index][date_index].append(
+                            sensitivity_list_N[zone_id][sens_index][date_index].append(
                                 [temp_params[sens_index], error_n_sens[1]])
+                            sensitivity_list_C[zone_id][sens_index][date_index].append(
+                                [temp_params[sens_index], error_c_sens[1]])
+
+
+
                 param_id += 1
             zone_id += 1
 
@@ -101,7 +107,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                             file.write(str(el) + ' ')
                     file.write('\n')
 
-    return dd_list, N_list, E_list, sensitivity_list
+    return dd_list, N_list, E_list, sensitivity_list_N, sensitivity_list_C
 
 
 def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False, n_zones=27):
@@ -244,29 +250,58 @@ def load_occupancy(filename, n_zones=27, sep=';'):
     return N, time_start, time_end
 
 
-def load_davide(optimise=False):
-    N, period = [], []
+def load_davide():
+    N_test, N_train, periods_test, periods_train, periods_adj_test, periods_adj_train = [], [], [], [], [], []
     with open('data/davides_office.csv', 'r') as file:
-        file.readline()
-        for line in file.readlines():
-            line = line.split(',')
-            t = str_to_dt(line[3][:16], f='%Y-%m-%d:%H:%M')
+        with open('data/davides_windows.csv', 'r') as file_windows:
+            file.readline()
+            temp_train, temp_test = [], []
+            temp_N_train, temp_N_test = [], []
+            temp_adj = []
+            line_windows = file_windows.readline().split(',')
+            t_windows = str_to_dt(line_windows[3][:16], f='%Y-%m-%d:%H:%M')
 
-            period.append([t, int(line[6])])
-            N.append(0)
-    dd_davide = [[period]]
-    if optimise:
-        v = 3 * 2 * 3
-        dt = 10 * 60
-        parameters = optimise_occupancy(dd_davide, [[N]], dt=dt, v=v, use_adjacent=False, bounds=bounds)
-        C = [el[1] for el in period]
-        C_adj = adjacent_co2(dd_davide, use_adjacent=False)[0][0]
-        C_est = C_estimate(parameters[0], C, C_adj, N=N, dt=dt, V=v)
-        N_est = N_estimate(parameters[0], C, C_adj, V=v, dt=dt)
-        error_c = error_fraction(C[1:], C_est, d=2)
-        error_n = error_fraction(N[1:], N_est, d=2)
-        plot_estimates(C[1:], C_est, N[1:], N_est, dt=dt, error_c=error_c, error_n=error_n)
-    return dd_davide, [[N]]
+            for line in file.readlines():
+                line = line.split(',')
+                t = str_to_dt(line[3][:16], f='%Y-%m-%d:%H:%M')
+
+                if 20 < t.hour or t.hour < 6:
+                    if temp_test:
+                        periods_test.append(temp_test)
+                        N_test.append(temp_N_test)
+                        temp_test, temp_N_test, temp_adj = [], [], []
+                    temp_train.append([t, int(line[6])])
+                    temp_N_train.append(0)
+                    temp_adj.append(0)
+                else:
+                    if temp_train:
+                        periods_train.append(temp_train)
+                        N_train.append(temp_N_train)
+                        temp_train, temp_N_train = [], []
+                    temp_test.append([t, int(line[6])])
+                    temp_N_test.append(0)
+
+    dd_train = [periods_train]
+    dd_test = [periods_test]
+
+    v = 3 * 2 * 3
+    dt = 10 * 60
+    parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, use_adjacent=False, bounds=bounds)
+    C = [[el[1] for el in period_test] for period_test in periods_test]
+    print(parameters)
+    C_adj = adjacent_co2(dd_test, use_adjacent=False)[0]  # for 0'th device
+    C_est, N_est = [], []
+    C_flat, N_flat = [], []
+    for c, n, c_adj in zip(C, N_test, C_adj):
+        C_flat = C_flat + [el for el in c[1:]]
+        N_flat = N_flat + [el for el in n[1:]]
+        C_est = C_est + [el for el in
+                         C_estimate(parameters[0], C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, dt=dt)]
+        N_est = N_est + [el for el in
+                         N_estimate(parameters[0], C=np.array(c), C_adj=c_adj, V=v, dt=dt)]
+    error_c = error_fraction(C_flat, C_est)[:2]
+    plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt,
+                   title="CO2 prediction and occupancy detection in Davide's office\n")
 
 
 def load_lists(dates, dt=15 * 60, filepath_and_prefix_co2='data/co2_', filepath_and_prefix_N='data/N_', n_zones=27):
@@ -687,17 +722,16 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
                                                                                                                   detected_reg_noneg):
         if error_n_mb:
             table_mean.append(
-                [zone_id, error_n_mb[0], error_n_lr[0], error_co2_mb[0], error_co2_lr[0], error_detected_mb,
-                 error_detected_lr])
+                [zone_id, np.average(error_n_mb), np.average(error_n_lr), np.average(error_co2_mb), np.average(error_co2_lr), np.average(error_detected_mb), np.average(error_detected_lr)])
             table_std.append([zone_id, error_n_mb[1], error_n_lr[1], error_co2_mb[1], error_co2_lr[1]])
-            table_detect_noneg.append([el1, el2])
+            table_detect_noneg.append([sum(el1)/len(el1), sum(el2)/len(el2)])
         zone_id += 1
     table_mean, table_std = np.asarray(table_mean), np.asarray(table_std)
 
     return table_mean, table_std, table_detect_noneg
 
 
-def sensitivity_plots(sensitivity_list, avg_params, avg_errors,filepath_plots='documents/plots/'):
+def sensitivity_plots(sensitivity_list, avg_params, avg_errors, filepath_plots='documents/plots/', post_fix='N'):
     """
     Using the sensitivity list, do the plots
 
@@ -723,11 +757,11 @@ def sensitivity_plots(sensitivity_list, avg_params, avg_errors,filepath_plots='d
             plt.plot(zone_line[:, 0], zone_line[:, 1])
             plt.scatter(avg_param[i], avg_errors[i])
         plt.xlabel(x_label)
-        plt.ylabel('N error')
+        plt.ylabel(f'{post_fix} error')
         plt.legend(legend)
-        plt.title('Average N error plotted against ' + x_label)
+        plt.title(f'Average {post_fix} error plotted against ' + x_label)
         if filepath_plots != '':
-            plt.savefig(filepath_plots + 'sensitivity_' + x_label)
+            plt.savefig(filepath_plots + 'sensitivity_' + x_label + '_' + post_fix)
         plt.show()
 
 
@@ -848,7 +882,7 @@ def str_to_dt(t, chars_to_remove='T', digits_to_remove=1, f='%Y-%m-%d:%H:%M:%S.%
     return datetime.strptime(t, f)
 
 
-def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
+def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False, use_window=False):
     """
     Calculates the absolute difference between the estimated CO2
     and True CO2:
@@ -866,7 +900,7 @@ def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
 
     C_est, N_est = [], []
     for c, n, c_adj in zip(C, N, C_adj):
-        C_est.append(C_estimate(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt))
+        C_est.append(C_estimate(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt, use_window=use_window))
         N_est.append(N_estimate(x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
 
     dist = 0
@@ -881,7 +915,7 @@ def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False):
     return dist
 
 
-def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
+def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2, use_window=False):
     """
     Calculates the estimated CO2 given parameters
     :param x:               Q, m and C_out
@@ -899,7 +933,10 @@ def C_estimate(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2):
 
     N = np.array(N)
     C = np.array(C) / ppm_factor  # ppm
-    C_adj = np.array(C_adj)[1:] / ppm_factor
+    if use_window:
+        C_adj = np.array(C_adj)[1:] * C_out / ppm_factor
+    else:
+        C_adj = np.array(C_adj)[1:] / ppm_factor
 
     Ci, N = C[:-1], N[1:]  # Remove first N, as there is no previous CO2
     C_est = (1 - Q * dt) * Ci + \
@@ -971,7 +1008,7 @@ def error_fraction(true_values, estimated_values, d=2):
 
 
 def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
-                       filename_parameters=None, use_adjacent=True, v=None):
+                       filename_parameters=None, use_adjacent=True, v=None, use_window=False):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -1009,10 +1046,11 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
             minimised = differential_evolution(
                 abs_distance,
                 x0=x,
-                args=(C, C_adj, N, v, m, dt, optimise_N,),
+                args=(C, C_adj, N, v, m, dt, optimise_N, use_window),
                 bounds=bounds,
                 # method=method
             )
+
 
             C_est, N_est = [], []
             C_flat, N_flat = [], []
