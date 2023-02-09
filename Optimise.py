@@ -17,21 +17,21 @@ filename_parameters = 'testing'
 filepath_plots = 'documents/plots/'
 
 
-load_davide()
+# load_davide()
 
-# dd_list, N_list, E_list, sensitivity_list, sensitivity_list_c = hold_out(dates, plot=False, filename_parameters=filename_parameters,
-#                                                      summary_errors=error_file, no_steps=100, optimise_N=False)
-# E_list_reg = simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False)
-# table_mean, table_std, table_detect_noneg = residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=False)
-# # Decide on plot for sensitivity, probably take average across periods?
-# avg_params, std_params = return_average_parameters(dates, filename_parameters)
-# sensitivity_plots(sensitivity_list, filepath_plots=filepath_plots, avg_params=avg_params, avg_errors=table_mean[:, 1])
-# sensitivity_plots(sensitivity_list_c, filepath_plots=filepath_plots, avg_params=avg_params, avg_errors=table_mean[:, 3], post_fix='CO2')
-#
-#
-# zone_names = [21, 22, 23, 25, 26, 27]
-# print(matrix_to_latex(table_mean))
-# print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), table_detect_noneg))))
-# print(matrix_to_latex(table_std))
-# print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), avg_params)), d=2))
-# print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), avg_params / std_params)), d=2))
+dd_list, N_list, E_list, sensitivity_list, sensitivity_list_c = hold_out(dates, plot=False, filename_parameters=filename_parameters,
+                                                     summary_errors=error_file, no_steps=100, optimise_N=False)
+E_list_reg = simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False)
+table_mean, table_std, table_detect_noneg = residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=False)
+# Decide on plot for sensitivity, probably take average across periods?
+avg_params, std_params = return_average_parameters(dates, filename_parameters)
+sensitivity_plots(sensitivity_list, filepath_plots=filepath_plots, avg_params=avg_params, avg_errors=table_mean[:, 1])
+sensitivity_plots(sensitivity_list_c, filepath_plots=filepath_plots, avg_params=avg_params, avg_errors=table_mean[:, 3], post_fix='CO2')
+
+
+zone_names = [21, 22, 23, 25, 26, 27]
+print(matrix_to_latex(table_mean))
+print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), table_detect_noneg))))
+print(matrix_to_latex(table_std))
+print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), avg_params)), d=2))
+print(matrix_to_latex(np.hstack((np.array(zone_names).reshape(-1, 1), avg_params / std_params)), d=2))
