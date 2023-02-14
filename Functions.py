@@ -248,8 +248,9 @@ def load_occupancy(filename, n_zones=27, sep=';'):
     return N, time_start, time_end
 
 
-def load_davide():
+def load_davide(save_filename=None):
     N_test, N_train, periods_test, periods_train, periods_adj_test, periods_adj_train = [], [], [], [], [], []
+    C_all = []
     with open('data/davides_office.csv', 'r') as file:
         with open('data/davides_windows.csv', 'r') as file_windows:
             file.readline()
@@ -262,8 +263,7 @@ def load_davide():
             for line in file.readlines():
                 line = line.split(',')
                 t = str_to_dt(line[3][:16], f='%Y-%m-%d:%H:%M')
-
-
+                C_all.append(int(line[6]))
                 if 20 < t.hour or t.hour < 6:
                     if temp_test:
                         periods_test.append(temp_test)
@@ -302,9 +302,9 @@ def load_davide():
                          N_estimate(parameters[0], C=np.array(c), C_adj=c_adj, V=v, dt=dt)]
     error_c = error_fraction(C_flat, C_est)[:2]
     print(np.average(np.abs(np.array(C_flat[:-1]) - np.array(C_flat[1:]))))
-    plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt,
+    plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt, save_filename=save_filename,
                    title=f"CO2 prediction and occupancy detection in Davide's office\nAverage Error: {error_c[1]}")
-
+    return C_all
 
 def load_lists(dates, dt=15 * 60, filepath_and_prefix_co2='data/co2_', filepath_and_prefix_N='data/N_', n_zones=27):
     # The structure is:
@@ -904,7 +904,8 @@ def abs_distance(x, C, C_adj, N, V, m, dt, optimise_N=False, use_window=False):
 
     C_est, N_est = [], []
     for c, n, c_adj in zip(C, N, C_adj):
-        C_est.append(C_estimate_new(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt, use_window=use_window))
+        C_est.append(
+            C_estimate_new(x, C=np.array(c), N=np.array(n), C_adj=c_adj, V=V, m=m, dt=dt, use_window=use_window))
         N_est.append(N_estimate(x, C=np.array(c), C_adj=c_adj, V=V, m=m, dt=dt))
 
     dist = 0
@@ -1012,9 +1013,9 @@ def C_estimate_new(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2, use_window=False):
         C_adj = np.array(C_adj)[1:]
 
     for i, c in enumerate(C[1:]):
-        c_est = (1 - Q * dt) * C_est[-1] +\
-                Q_adj * dt * C_adj[i] +\
-                Q_out * dt * C_out +\
+        c_est = (1 - Q * dt) * C_est[-1] + \
+                Q_adj * dt * C_adj[i] + \
+                Q_out * dt * C_out + \
                 N[i] * dt * m / V
         C_est.append(c_est)
 
