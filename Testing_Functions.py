@@ -1,10 +1,31 @@
+import time
 import numpy as np
 import pandas as pd
+from datetime import timedelta, datetime
 from Functions import update_data, process_data, basic_weighting, \
-    level_from_estimate, mass_balance
+    level_from_estimate, mass_balance, calculate_n_estimate, load_data
 
-df = pd.read_csv('data/data2.csv')
-new_data = process_data(df, id_index=2, time_indexes=[0], minutes=10000000)
+filename = 'data/co2_2022_07_12.csv'
+end = datetime.now()
+start = datetime.now() - timedelta(days=120)
+dd_list = load_data(filename, start, end)
+
+filename = 'data/co2_2022_09_12.csv'
+end = datetime.now()
+start = datetime.now() - timedelta(days=120)
+dd_list_2 = load_data(filename, start, end, replace=False)
+
+new_data = [[] for _ in dd_list]
+old_data = [[] for _ in dd_list_2]
+
+i = 0
+for device_old, device_new in zip(dd_list, dd_list_2):
+    if device_new:
+        pass
+    i += 1
+
+
+new_data = None
 old_data = np.zeros((27, 2))
 old_time = np.array(new_data[:int(27 * 2), 0]).reshape((27, 2))
 current_co2, current_time = update_data(new_data, old_data, old_time)

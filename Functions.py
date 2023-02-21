@@ -63,7 +63,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
                 N = occupancy[date_index]
                 c_adj = C_adj[date_index]
                 # print(C, N, occupancy)
-                C_est = C_estimate(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
+                C_est = C_estimate_new(x=parameters[param_id], C=C, C_adj=c_adj, N=N, V=v, m=m, dt=dt)
                 N_est = N_estimate(x=parameters[param_id], C=C, C_adj=c_adj, V=v, m=m, dt=dt)
                 error_c = error_fraction(C[1:], C_est)
                 error_n = error_fraction(N[1:], N_est)
@@ -248,7 +248,7 @@ def load_occupancy(filename, n_zones=27, sep=';'):
     return N, time_start, time_end
 
 
-def load_davide(save_filename=None):
+def load_davide(save_filename=None, train_night_only=False):
     N_test, N_train, periods_test, periods_train, periods_adj_test, periods_adj_train = [], [], [], [], [], []
     C_all = []
     with open('data/davides_office.csv', 'r') as file:
@@ -257,54 +257,79 @@ def load_davide(save_filename=None):
             temp_train, temp_test = [], []
             temp_N_train, temp_N_test = [], []
             temp_adj = []
+            line_no = 0
+            presence_set = set(range(22,40)).union(range(129,144)).union(range(455, 483))
             line_windows = file_windows.readline().split(',')
             t_windows = str_to_dt(line_windows[3][:16], f='%Y-%m-%d:%H:%M')
-
             for line in file.readlines():
                 line = line.split(',')
                 t = str_to_dt(line[3][:16], f='%Y-%m-%d:%H:%M')
                 C_all.append(int(line[6]))
-                if 20 < t.hour or t.hour < 6:
-                    if temp_test:
-                        periods_test.append(temp_test)
-                        N_test.append(temp_N_test)
-                        temp_test, temp_N_test, temp_adj = [], [], []
-                    temp_train.append([t, int(line[6])])
-                    temp_N_train.append(0)
-                    temp_adj.append(0)
-                else:
-                    if temp_train:
-                        periods_train.append(temp_train)
-                        periods_test.append(temp_train)
-                        N_train.append(temp_N_train)
-                        N_test.append(temp_N_train)
-                        temp_train, temp_N_train = [], []
-                    temp_test.append([t, int(line[6])])
-                    temp_N_test.append(0)
+                presence = line_no in presence_set
+                while t_windows < t and (len(line_windows) != 1):
+                    t_windows = str_to_dt(line_windows[3][:16], f='%Y-%m-%d:%H:%M')
+                    line_windows = file_windows.readline().split(',')
+                adj = len(line_windows) != 1 and line_windows[6] == 'false'
+                if train_night_only:
+                    if 20 < t.hour or t.hour < 6:
+                        if temp_test:
+                            periods_test.append(temp_test)
+                            N_test.append(temp_N_test)
+                            temp_test, temp_N_test, temp_adj = [], [], []
+                        temp_train.append([t, int(line[6])])
+                        temp_N_train.append(presence)
+                        temp_adj.append(adj)
+                    else:
+                        if temp_train:
+                            periods_train.append(temp_train)
+                            periods_test.append(temp_train)
+                            N_train.append(temp_N_train)
+                            N_test.append(temp_N_train)
+                            temp_train, temp_N_train = [], []
+                        temp_test.append([t, int(line[6])])
+                        temp_N_test.append(presence)
 
-    dd_train = [periods_train]
-    dd_test = [periods_test]
+                else:
+                    temp_adj.append(adj)
+                    temp_train.append([t, int(line[6])])
+                    temp_N_train.append(presence)
+                line_no += 1
+    if train_night_only:
+        dd_train = [periods_train]
+        dd_test = [periods_test]
+    else:
+        dd_train = [[temp_train]]
+        dd_test = [[temp_train]]
+        N_train = [temp_N_train]
+        N_test = [temp_N_train]
 
     v = 3 * 2 * 3
     dt = 10 * 60
-    parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, use_adjacent=False, bounds=bounds)
-    C = [[el[1] for el in period_test] for period_test in periods_test]
+    if temp_adj:
+        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, C_adj_list=[[temp_adj]], use_window=True, bounds=bounds)
+    else:
+        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, use_adjacent=False, bounds=bounds)
+
+    # C = [[el[1] for el in period_test] for period_test in periods_test]
     print(parameters)
     C_adj = adjacent_co2(dd_test, use_adjacent=False)[0]  # for 0'th device
     C_est, N_est = [], []
     C_flat, N_flat = [], []
-    for c, n, c_adj in zip(C, N_test, C_adj):
+    for c, n, c_adj in zip([C_all], N_test, C_adj):
         C_flat = C_flat + [el for el in c[1:]]
         N_flat = N_flat + [el for el in n[1:]]
         C_est = C_est + [el for el in
-                         C_estimate(parameters[0], C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, dt=dt)]
+                         C_estimate_new(parameters[0], C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, dt=dt)]
         N_est = N_est + [el for el in
                          N_estimate(parameters[0], C=np.array(c), C_adj=c_adj, V=v, dt=dt)]
     error_c = error_fraction(C_flat, C_est)[:2]
     print(np.average(np.abs(np.array(C_flat[:-1]) - np.array(C_flat[1:]))))
+
     plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt, save_filename=save_filename,
-                   title=f"CO2 prediction and occupancy detection in Davide's office\nAverage Error: {error_c[1]}")
-    return C_all
+                   title=f"CO2 prediction and occupancy detection in Davide's office\nAverage CO2 Error: {error_c[1]}",
+                   legend_bar=['N estimated', 'N True'], legend_plot=['CO2 simulated', 'CO2 True'])
+    return C_all, N_est, N_flat
+
 
 def load_lists(dates, dt=15 * 60, filepath_and_prefix_co2='data/co2_', filepath_and_prefix_N='data/N_', n_zones=27):
     # The structure is:
@@ -434,7 +459,7 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
                 # print(f'Time {temp_time} missing from zone {i}')
                 if replace:
                     # Find the position in the average time array with which to sub
-                    column = int(temp_time.hour * 4 + temp_time.minute / dt) + 1
+                    column = int(temp_time.hour * 4 + temp_time.minute / dt)
                     emp = zone_averages[i, column] * (1 - replace) + replace * new_data[-1][1] \
                         if len(new_data) > 0 else zone_averages[i, column]
 
@@ -770,7 +795,8 @@ def sensitivity_plots(sensitivity_list, avg_params, avg_errors, filepath_plots='
 
 
 def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, start_time=None, error_c=None,
-                   error_n=None, title='', width=4, alpha=0.4, x_label='', save_filename=None):
+                   error_n=None, title='', width=4, alpha=0.4, x_label='', save_filename=None,
+                   legend_bar=None, legend_plot=None):
     """
     Given the relevant parameters and the associated errors
     plot the results.
@@ -805,6 +831,10 @@ def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, st
     ax2 = ax1.twinx()
     ax2.bar(x_vals, N, color='red', alpha=alpha - 0.2, width=width)
     ax2.bar(x_vals, N_est, color='orange', alpha=alpha, width=width)
+    if legend_bar is not None:
+        ax2.legend(legend_bar)
+    if legend_plot is not None:
+        ax1.legend(legend_plot, loc='upper center')
     plt.tight_layout()
     # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
     # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
@@ -1000,6 +1030,7 @@ def C_estimate_new(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2, use_window=False):
     :param use_window:
     :return:
     """
+
     Q_adj, Q_out, C_out, m = x
     Q = Q_adj + Q_out
 
@@ -1049,7 +1080,7 @@ def error_fraction(true_values, estimated_values, d=2):
 
 
 def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
-                       filename_parameters=None, use_adjacent=True, v=None, use_window=False):
+                       filename_parameters=None, use_adjacent=True, v=None, use_window=False, C_adj_list=None):
     """
     Given data in the format from the above function and potentially
     vectors representing the occupancy and volumes, find the optimal
@@ -1064,7 +1095,9 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
     :param filename_parameters: string of filename to store parameters in
     :return:
     """
-    C_adj_list = adjacent_co2(dd_list, use_adjacent=use_adjacent)
+
+    if C_adj_list is None:
+        C_adj_list = adjacent_co2(dd_list, use_adjacent=use_adjacent)
 
     x = []
     for bound in bounds:
@@ -1098,7 +1131,7 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
                 C_flat = C_flat + [el for el in c[1:]]
                 N_flat = N_flat + [el for el in n[1:]]
                 C_est = C_est + [el for el in
-                                 C_estimate(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt)]
+                                 C_estimate_new(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt)]
                 N_est = N_est + [el for el in
                                  N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt)]
             error_c = error_fraction(C_flat, C_est)
@@ -1273,6 +1306,7 @@ def update_data(new_data, old_data, old_time, time_index=0, co2_index=1, id_inde
     """
     output = old_data
     output_time = old_time
+    # Assumes newest data comes first
     for row in new_data:
         device_id = row[id_index] - 1  # convert to comply with 0 indexed arrays
         # If no data from the current device has been seen yet, input it in the first column of output
