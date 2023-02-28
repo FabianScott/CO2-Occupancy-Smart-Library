@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from copy import copy, deepcopy
+from scipy.ndimage import uniform_filter1d
 from sigfig import round
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ from statsmodels.stats.contingency_tables import mcnemar
 
 
 def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_parameters='testing', optimise_N=False,
-             summary_errors=None, no_steps=0):
+             summary_errors=None, no_steps=0, smooth_co2=3):
     """
     Given a list of dates in the format yyyy_dd_mm, same as filenames
     for data, use the hold out method on each period of data, using it
@@ -42,7 +43,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
             temp_N.append(occupancy[:date_index] + occupancy[date_index + 1:])
 
         filepath_parameters = f'parameters/{filename_parameters}_{date}.csv'
-        parameters = optimise_occupancy(temp_dd, N_list=temp_N, optimise_N=optimise_N,
+        parameters = optimise_occupancy(temp_dd, N_list=temp_N, optimise_N=optimise_N, smooth_co2=smooth_co2,
                                         filename_parameters=filepath_parameters, bounds=bounds)
         print(f'Coefficients for CO2:\n'
               f'{(1 - dt * sum(parameters[0, :2]))} * C_(i-1) +\n'
@@ -60,6 +61,8 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
         for device, occupancy, C_adj, v, max_n in zip(dd_list, N_list, adj_list, V, max_N):
             if device[0] and occupancy[0]:
                 C = [el[1] for el in device[date_index]]
+                if smooth_co2:
+                    C = uniform_filter1d(np.array(C), size=10)
                 N = occupancy[date_index]
                 c_adj = C_adj[date_index]
                 # print(C, N, occupancy)
@@ -248,7 +251,7 @@ def load_occupancy(filename, n_zones=27, sep=';'):
     return N, time_start, time_end
 
 
-def load_davide(save_filename=None, train_night_only=False):
+def load_davide(save_filename=None, train_night_only=False, filepath_plots='documents/plots', smooth_co2=10):
     N_test, N_train, periods_test, periods_train, periods_adj_test, periods_adj_train = [], [], [], [], [], []
     C_all = []
     with open('data/davides_office.csv', 'r') as file:
@@ -258,7 +261,7 @@ def load_davide(save_filename=None, train_night_only=False):
             temp_N_train, temp_N_test = [], []
             temp_adj = []
             line_no = 0
-            presence_set = set(range(22,40)).union(range(129,144)).union(range(455, 483))
+            presence_set = set(range(22, 38)).union(range(129, 144)).union(range(463, 470))
             line_windows = file_windows.readline().split(',')
             t_windows = str_to_dt(line_windows[3][:16], f='%Y-%m-%d:%H:%M')
             for line in file.readlines():
@@ -303,12 +306,14 @@ def load_davide(save_filename=None, train_night_only=False):
         N_train = [temp_N_train]
         N_test = [temp_N_train]
 
-    v = 3 * 2 * 3
+    v = 3 * 2 * 4
     dt = 10 * 60
+    from constants import bounds_davide
     if temp_adj:
-        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, C_adj_list=[[temp_adj]], use_window=True, bounds=bounds)
+        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, C_adj_list=[[temp_adj]], use_window=True,
+                                        bounds=bounds_davide, smooth_co2=smooth_co2)
     else:
-        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, use_adjacent=False, bounds=bounds)
+        parameters = optimise_occupancy(dd_train, [N_train], dt=dt, v=v, use_adjacent=False, bounds=bounds_davide, smooth_co2=smooth_co2)
 
     # C = [[el[1] for el in period_test] for period_test in periods_test]
     print(parameters)
@@ -316,18 +321,42 @@ def load_davide(save_filename=None, train_night_only=False):
     C_est, N_est = [], []
     C_flat, N_flat = [], []
     for c, n, c_adj in zip([C_all], N_test, C_adj):
+        if smooth_co2:
+            c = uniform_filter1d(np.array(c), size=10)
         C_flat = C_flat + [el for el in c[1:]]
         N_flat = N_flat + [el for el in n[1:]]
         C_est = C_est + [el for el in
                          C_estimate_new(parameters[0], C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, dt=dt)]
         N_est = N_est + [el for el in
                          N_estimate(parameters[0], C=np.array(c), C_adj=c_adj, V=v, dt=dt)]
+
     error_c = error_fraction(C_flat, C_est)[:2]
-    print(np.average(np.abs(np.array(C_flat[:-1]) - np.array(C_flat[1:]))))
+    # print(np.average(np.abs(np.array(C_flat[:-1]) - np.array(C_flat[1:]))))
+    errors_co2 = np.array(C_flat) - np.array(C_est)
+
+    proportion_50_co2 = sum(np.abs(errors_co2) > 50)/len(errors_co2)
+    proportion_100_co2 = sum(np.abs(errors_co2) > 100)/len(errors_co2)
+
+    plt.hist(errors_co2, bins=100)
+    plt.title(
+        f'Histogram of CO2 errors in the office for MB\nError 50 ppm {round(proportion_50_co2, 4) * 100} % Error 100 ppm {round(proportion_100_co2, 4) * 100} %')
+    plt.savefig(filepath_plots + 'hist_co2')
+    plt.show()
 
     plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt, save_filename=save_filename,
-                   title=f"CO2 prediction and occupancy detection in Davide's office\nAverage CO2 Error: {error_c[1]}",
-                   legend_bar=['N estimated', 'N True'], legend_plot=['CO2 simulated', 'CO2 True'])
+                   title=f"CO2 prediction and occupancy detection in Davide's office\nAverage CO2 Error: {error_c[1]}"
+                         f"\nProportion N error: {round(sum(N_est == N_flat)/len(N_flat),3)}",
+                   legend_bar=['N True', 'N estimated'], legend_plot=['CO2 True', 'CO2 simulated'])
+
+    N_est = np.array(N_est)
+    N_flat = np.array(N_flat)
+    print(f'Accuracy total: {round(sum(N_est == N_flat)/len(N_flat),3)}\n'
+          f'Accuracy when present: {round(sum((N_est == N_flat)[N_flat == 1])/sum(N_flat == 1),3)}\n'
+          f'Accuracy when not present: {round(sum((N_est == N_flat)[N_flat == 0])/sum(N_flat == 0),3)}\n')
+    # no_0 = np.clip(N_est, 0, 10)
+    # print(f'For no negative occupancy:\n Accuracy total: {round(sum(no_0 == N_flat) / len(N_flat),3)}\n'
+    #       f'Accuracy when present: {round(sum((no_0 == N_flat)[N_flat == 1]) / sum(N_flat == 1),3)}\n'
+    #       f'Accuracy when not present: {round(sum((no_0 == N_flat)[N_flat == 0]) / sum(N_flat == 0),3)}\n')
     return C_all, N_est, N_flat
 
 
@@ -450,7 +479,7 @@ def load_data(filename, start_time, end_time, dt=15 * 60, sep=',', format_time='
             # Check if there was any data
             if temp:
                 if smoothing_type[0].lower() == 'e':
-                    co2_smoothed = exponential_moving_average(temp, tau=dt)
+                    co2_smoothed = exponential_moving_average(temp, tau=dt*3)
                 elif smoothing_type[0].lower() == 'k':
                     co2_smoothed = kalman_estimates(np.array(temp)[:, 1])[0][-1]
                 new_data.append((temp_time, co2_smoothed))
@@ -631,10 +660,10 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         if plot:
             if C_est and N_est:
                 print(f'plotting {dev_id}..')
-                plot_estimates(C, C_est, N, N_est, title=f'All errors for zone {dev_id} Mass Balance',
+                plot_estimates(C, C_est, N, errors_N, title=f'All errors for zone {dev_id} Mass Balance',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
-                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All errors for zone {dev_id} Linear Regression',
+                plot_estimates(C, C_est_reg, N, errors_N_reg, title=f'All errors for zone {dev_id} Linear Regression',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
         dev_id += 1
@@ -643,7 +672,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.scatter(all_co2, errors_co2, marker='.')
         cor_co2 = round(np.corrcoef(all_co2, errors_co2)[1, 0], 3)
         plt.title(f'CO2 residual plot MB\nCorrelation: {cor_co2}')
-        plt.ylabel('Residual')
+        plt.ylabel('CO2 Residual')
         plt.xlabel('CO2')
         plt.savefig(filepath_plots + 'co2_residual_MB', bbox_inches='tight')
         plt.show()
@@ -651,7 +680,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.scatter(all_N, errors_N, marker='.')
         cor_N = round(np.corrcoef(all_N, errors_N)[1, 0], 3)
         plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
-        plt.ylabel('Residual')
+        plt.ylabel('N Residual')
         plt.xlabel('N')
         plt.savefig(filepath_plots + 'N_residual_MB')
         plt.show()
@@ -659,7 +688,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.scatter(all_co2, errors_N, marker='.')
         cor_N = round(np.corrcoef(all_co2, errors_N)[1, 0], 3)
         plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
-        plt.ylabel('Residual N')
+        plt.ylabel('N Residual')
         plt.xlabel('CO2')
         plt.savefig(filepath_plots + 'co2_N_residual_MB')
         plt.show()
@@ -667,7 +696,7 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.scatter(all_co2, errors_co2_reg, marker='.')
         cor_co2 = round(np.corrcoef(all_co2, errors_co2_reg)[1, 0], 3)
         plt.title(f'CO2 residual plot reg\nCorrelation: {cor_co2}')
-        plt.ylabel('Residual')
+        plt.ylabel('CO2 Residual')
         plt.xlabel('CO2')
         plt.savefig(filepath_plots + 'co2_residual_LR', bbox_inches='tight')
         plt.show()
@@ -675,16 +704,16 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.scatter(all_N, errors_N_reg, marker='.')
         cor_N = round(np.corrcoef(all_N, errors_N_reg)[1, 0], 3)
         plt.title(f'N residual plot MB\nCorrelation: {cor_N}')
-        plt.ylabel('Residual')
+        plt.ylabel('N Residual')
         plt.xlabel('N')
         plt.savefig(filepath_plots + 'N_residual_LR')
         plt.show()
 
         plt.scatter(all_co2, errors_N_reg, marker='.')
         cor_N = round(np.corrcoef(all_co2, errors_N_reg)[1, 0], 3)
-        plt.title(f'CO2/N residual plot MB\nCorrelation: {cor_N}')
-        plt.ylabel('Residual')
-        plt.xlabel('N')
+        plt.title(f'CO2/N residual plot reg\nCorrelation: {cor_N}')
+        plt.ylabel('N Residual')
+        plt.xlabel('CO2')
         plt.savefig(filepath_plots + 'co2_N_residual_LR')
         plt.show()
 
@@ -711,6 +740,24 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         plt.title(f'Q-Q plot CO2 errors Linear Regression\nShapiro p-value: {shapiro_p}')
         plt.savefig(filepath_plots + 'qq_co2_lr')
         plt.show()
+
+        proportion_50_co2 = sum(np.abs(errors_co2) > 50)/len(errors_co2)
+        proportion_100_co2 = sum(np.abs(errors_co2) > 100)/len(errors_co2)
+        proportion_50_co2_reg = sum(np.abs(errors_co2_reg) > 50)/len(errors_co2_reg)
+        proportion_100_co2_reg = sum(np.abs(errors_co2_reg) > 100)/len(errors_co2_reg)
+        plt.hist(errors_co2, bins=100)
+        plt.title(f'Histogram of CO2 errors for Mass Balance\nError +-50 ppm: {proportion_50_co2*100} % Error +- 100 ppm {proportion_100_co2*100} %')
+        plt.savefig(filepath_plots + 'hist_co2')
+        plt.show()
+
+        plt.hist(errors_co2, bins=100)
+        plt.title(
+            f'Histogram of CO2 errors for Linear Regression\nError +-50 ppm: {proportion_50_co2_reg * 100} % Error +- 100 ppm {proportion_100_co2_reg * 100} %')
+        plt.savefig(filepath_plots + 'hist_co2')
+        plt.show()
+
+
+
 
     print('For N:')
     if do_summary:
@@ -1048,6 +1095,12 @@ def C_estimate_new(x, C, C_adj, N, V, dt=15 * 60, m=15, d=2, use_window=False):
                 Q_adj * dt * C_adj[i] + \
                 Q_out * dt * C_out + \
                 N[i] * dt * m / V
+        # if N[i]:
+        #     print('New')
+        #     print((1 - Q * dt), Q_out * dt)
+        #     print((1 - Q * dt) * C_est[-1])
+        #     print(Q_out * dt * C_out)
+        #     print(N[i] * dt * m / V)
         C_est.append(c_est)
 
     return np.round(C_est[1:], decimals=d)
@@ -1079,7 +1132,7 @@ def error_fraction(true_values, estimated_values, d=2):
     return np.round(n_false / n_total, d), np.round(sum(np.abs(error_list)) / n_total, d), error_list
 
 
-def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None,
+def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, bounds=None, smooth_co2=10,
                        filename_parameters=None, use_adjacent=True, v=None, use_window=False, C_adj_list=None):
     """
     Given data in the format from the above function and potentially
@@ -1111,8 +1164,10 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
         # skip every iteration where zone has no occupancy/co2 data
         if device[0] and len(N_list[i][0]) > 0:
             zone_ids.append(i)
-            # exctract the C's, N's and C_adj's as lists of periods
+            # extract the C's, N's and C_adj's as lists of periods
             C = [[el[1] for el in period] for period in device]
+            if smooth_co2:
+                C = uniform_filter1d(np.array(C[0]), size=smooth_co2).reshape(1, -1)
             N = N_list[i]
             C_adj = C_adj_list[i]
             if v is None:
@@ -1128,10 +1183,13 @@ def optimise_occupancy(dd_list, N_list, m=15, dt=15 * 60, optimise_N=False, boun
             C_est, N_est = [], []
             C_flat, N_flat = [], []
             for c, n, c_adj in zip(C, N, C_adj):
+                if smooth_co2:
+                    c = uniform_filter1d(np.array(c), size=10)
                 C_flat = C_flat + [el for el in c[1:]]
                 N_flat = N_flat + [el for el in n[1:]]
                 C_est = C_est + [el for el in
-                                 C_estimate_new(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m, dt=dt)]
+                                 C_estimate_new(minimised.x, C=np.array(c), C_adj=c_adj, N=np.array(n), V=v, m=m,
+                                                dt=dt)]
                 N_est = N_est + [el for el in
                                  N_estimate(minimised.x, C=np.array(c), C_adj=c_adj, V=v, m=m, dt=dt)]
             error_c = error_fraction(C_flat, C_est)
@@ -1524,3 +1582,9 @@ def mass_balance(C, Q, V, n_total, current_time=[], n_map=None, C_out=420, alpha
         M.flatten()
         N_estimated = N_estimated * M / np.average(M)
     return N_estimated.round(decimals)
+
+
+if __name__ == '__main__':
+    filepath_plots = 'documents/plots/'
+    temp, N_est, N_flat = load_davide(save_filename=filepath_plots + 'davide_plot.png', smooth_co2=5)
+
