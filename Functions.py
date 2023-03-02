@@ -340,16 +340,16 @@ def load_davide(save_filename=None, train_night_only=False, filepath_plots='docu
     plt.hist(errors_co2, bins=100)
     plt.title(
         f'Histogram of CO2 errors in the office for MB\nError 50 ppm {round(proportion_50_co2, 4) * 100} % Error 100 ppm {round(proportion_100_co2, 4) * 100} %')
-    plt.savefig(filepath_plots + 'hist_co2')
+    plt.savefig(filepath_plots + '/davide_hist_co2.png')
     plt.show()
 
+    N_est = np.array(N_est)
+    N_flat = np.array(N_flat)
     plot_estimates(C_flat, C_est, N_flat, N_est, dt=dt, save_filename=save_filename,
                    title=f"CO2 prediction and occupancy detection in Davide's office\nAverage CO2 Error: {error_c[1]}"
                          f"\nProportion N error: {round(sum(N_est == N_flat)/len(N_flat),3)}",
                    legend_bar=['N True', 'N estimated'], legend_plot=['CO2 True', 'CO2 simulated'])
 
-    N_est = np.array(N_est)
-    N_flat = np.array(N_flat)
     print(f'Accuracy total: {round(sum(N_est == N_flat)/len(N_flat),3)}\n'
           f'Accuracy when present: {round(sum((N_est == N_flat)[N_flat == 1])/sum(N_flat == 1),3)}\n'
           f'Accuracy when not present: {round(sum((N_est == N_flat)[N_flat == 0])/sum(N_flat == 0),3)}\n')
@@ -660,10 +660,10 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         if plot:
             if C_est and N_est:
                 print(f'plotting {dev_id}..')
-                plot_estimates(C, C_est, N, errors_N, title=f'All errors for zone {dev_id} Mass Balance',
+                plot_estimates(C, C_est, N, EBD_N[dev_id], title=f'All errors for zone {dev_id} Mass Balance',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
-                plot_estimates(C, C_est_reg, N, errors_N_reg, title=f'All errors for zone {dev_id} Linear Regression',
+                plot_estimates(C, C_est_reg, N, EBD_N_reg[dev_id], title=f'All errors for zone {dev_id} Linear Regression',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
         dev_id += 1
