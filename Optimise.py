@@ -20,7 +20,7 @@ filepath_plots = 'documents/plots/'
 
 
 dd_list, N_list, E_list, sensitivity_list, sensitivity_list_c = hold_out(dates, plot=False, filename_parameters=filename_parameters,
-                                                     summary_errors=error_file, no_steps=100, optimise_N=False, smooth_co2=3)
+                                                     summary_errors=error_file, no_steps=100, optimise_N=False, smooth_co2=1)
 E_list_reg = simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatter=False)
 table_mean, table_std, table_detect_noneg = residual_analysis(dd_list, N_list, E_list, E_list_reg, plot=True)
 # Decide on plot for sensitivity, probably take average across periods?

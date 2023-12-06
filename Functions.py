@@ -62,7 +62,7 @@ def hold_out(dates, m=15, dt=15 * 60, plot=False, use_adjacent=True, filename_pa
             if device[0] and occupancy[0]:
                 C = [el[1] for el in device[date_index]]
                 if smooth_co2:
-                    C = uniform_filter1d(np.array(C), size=10)
+                    C = uniform_filter1d(np.array(C), size=smooth_co2)
                 N = occupancy[date_index]
                 c_adj = C_adj[date_index]
                 # print(C, N, occupancy)
@@ -169,9 +169,11 @@ def simple_models_hold_out(dates, dt=15 * 60, method='l', plot=False, plot_scatt
                     plt.plot(C_train, reg_N.predict(C_train), c='c')
                     plt.xlabel('CO2 level')
                     plt.ylabel('Occupancy level')
+                    plt.legend(['C train', 'C test', 'Line of best fit'])
                     plt.title(f'Linear regression scatter plot in zone {zone_id}\n'
                               f'Test point from period {start_time}\n'
                               f'Errors (Train, Test): {round(reg_N.score(C_train, N_train), 3), round(reg_N.score(C_test, N_test), 3)}')
+                    plt.tight_layout()
                     plt.show()
 
                 C_est, N_est = C_est.flatten(), N_est.flatten()
@@ -660,10 +662,10 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         if plot:
             if C_est and N_est:
                 print(f'plotting {dev_id}..')
-                plot_estimates(C, C_est, N, EBD_N[dev_id], title=f'All errors for zone {dev_id} Mass Balance',
+                plot_estimates(C, C_est, N, N_est, title=f'All data for zone {dev_id} Mass Balance',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_MB_{dev_id}')
-                plot_estimates(C, C_est_reg, N, EBD_N_reg[dev_id], title=f'All errors for zone {dev_id} Linear Regression',
+                plot_estimates(C, C_est_reg, N, N_est_reg, title=f'All data for zone {dev_id} Linear Regression',
                                x_vals=range(len(N)), width=0.5, x_label='Time steps',
                                save_filename=filepath_plots + f'All_errors_LR_{dev_id}')
         dev_id += 1
@@ -746,17 +748,15 @@ def residual_analysis(dd_list, N_list, E_list, E_list_reg, filepath_plots='docum
         proportion_50_co2_reg = sum(np.abs(errors_co2_reg) > 50)/len(errors_co2_reg)
         proportion_100_co2_reg = sum(np.abs(errors_co2_reg) > 100)/len(errors_co2_reg)
         plt.hist(errors_co2, bins=100)
-        plt.title(f'Histogram of CO2 errors for Mass Balance\nError +-50 ppm: {proportion_50_co2*100} % Error +- 100 ppm {proportion_100_co2*100} %')
-        plt.savefig(filepath_plots + 'hist_co2')
+        plt.title(f'Histogram of CO2 errors for Mass Balance\nError +-50 ppm: {round(proportion_50_co2*100, 1)} % Error +- 100 ppm {round(proportion_100_co2*100, 1)} %')
+        plt.savefig(filepath_plots + 'hist_co2.png')
         plt.show()
 
-        plt.hist(errors_co2, bins=100)
+        plt.hist(errors_co2_reg, bins=100)
         plt.title(
-            f'Histogram of CO2 errors for Linear Regression\nError +-50 ppm: {proportion_50_co2_reg * 100} % Error +- 100 ppm {proportion_100_co2_reg * 100} %')
-        plt.savefig(filepath_plots + 'hist_co2')
+            f'Histogram of CO2 errors for Linear Regression\nError +-50 ppm: {round(proportion_50_co2_reg * 100, 1)} % Error +- 100 ppm {round(proportion_100_co2_reg * 100, 1)} %')
+        plt.savefig(filepath_plots + 'hist_co2_reg.png')
         plt.show()
-
-
 
 
     print('For N:')
@@ -825,7 +825,7 @@ def sensitivity_plots(sensitivity_list, avg_params, avg_errors, filepath_plots='
             legend.append(f'Zone {zone_id}')
             legend.append('_Hidden label')
             for i in range(4):
-                temp = np.array([np.array(el) for el in zone[i]])
+                # temp = np.array([np.array(el) for el in zone[i]])
                 sens_plotting_list[i].append(np.array(zone[i]).mean(axis=0))
     x_labels = ['Q_adj', 'Q_out', 'C_out', 'm']
     for sens_set, x_label, avg_param in zip(sens_plotting_list, x_labels, avg_params.T):
@@ -874,6 +874,7 @@ def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, st
         )
     else:
         plt.title(title)
+    ax1.legend(['CO2', 'CO2 estimated'])
 
     ax2 = ax1.twinx()
     ax2.bar(x_vals, N, color='red', alpha=alpha - 0.2, width=width)
@@ -882,6 +883,7 @@ def plot_estimates(C, C_est, N, N_est, dt=60 * 15, x_vals=None, zone_id=None, st
         ax2.legend(legend_bar)
     if legend_plot is not None:
         ax1.legend(legend_plot, loc='upper center')
+    ax2.legend(['N', 'N estimated'])
     plt.tight_layout()
     # ax1.legend(['CO2 true', 'CO2 Estimated'], loc='upper left', title='Metric: ppm')
     # ax2.legend(['N true', 'N Estimated'], loc='upper right', title='Rounded to integer')
